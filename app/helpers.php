@@ -41,7 +41,7 @@ function str_has_numeric($string, $count = 1)
 
 function determine_mship_state_from_vatsim($region, $division)
 {
-    $states = \App\Models\Mship\State::orderBy('priority')->get();
+    $states = App\Models\Mship\State::orderBy('priority')->get();
 
     foreach ($states as $state) {
         $regionMatch = false;
@@ -73,7 +73,7 @@ function determine_mship_state_from_vatsim($region, $division)
         }
     }
 
-    return \App\Models\Mship\State::findByCode('UNKNOWN');
+    return App\Models\Mship\State::findByCode('UNKNOWN');
 }
 
 function format_name($name)
@@ -100,7 +100,7 @@ function is_date_string($suspectedDateString)
 function is_relative_date_string($suspectedRelativeDateString)
 {
     try {
-        \Carbon\Carbon::parse($suspectedRelativeDateString, 'UTC');
+        Carbon\Carbon::parse($suspectedRelativeDateString, 'UTC');
 
         return true;
     } catch (Exception $e) {
@@ -114,12 +114,12 @@ function human_diff_string(Carbon\Carbon $ts1, Carbon\Carbon $ts2, $absolute = f
         return 'unknown length';
     }
 
-    $min = \Carbon\Carbon::parse('0001-01-01 00:00:00');
-    $max = \Carbon\Carbon::parse('9999-12-31 23:59:59');
+    $min = Carbon\Carbon::parse('0001-01-01 00:00:00');
+    $max = Carbon\Carbon::parse('9999-12-31 23:59:59');
     if ($ts2 < $min || $ts2 > $max) {
-        throw new \Carbon\Exceptions\InvalidDateException('Date outside range', $ts2);
+        throw new Carbon\Exceptions\InvalidDateException('Date outside range', $ts2);
     } elseif ($ts1 < $min || $ts1 > $max) {
-        throw new \Carbon\Exceptions\InvalidDateException('Date outside range', $ts1);
+        throw new Carbon\Exceptions\InvalidDateException('Date outside range', $ts1);
     }
 
     $diff = $ts1->diff($ts2, $absolute);
@@ -214,6 +214,22 @@ function handleService(App\Services\BaseService $service)
 if (! function_exists('str_contains')) {
     function str_contains($haystack, $needle)
     {
-        return \Illuminate\Support\Str::contains($haystack, $needle);
+        return Illuminate\Support\Str::contains($haystack, $needle);
+    }
+}
+
+if (! function_exists('audit')) {
+    /**
+     * Write an actor-attributed record to the audit channel.
+     * For "who did what to whom" staff/member state changes only - never errors.
+     */
+    function audit(string $message, array $context = []): void
+    {
+        if ($user = auth()->user()) {
+            $context['actor_id'] = $user->getAuthIdentifier();
+            $context['actor_name'] = (string) $user->name;
+        }
+
+        Illuminate\Support\Facades\Log::channel('audit')->info($message, $context);
     }
 }

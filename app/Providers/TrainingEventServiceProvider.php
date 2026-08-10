@@ -26,6 +26,16 @@ class TrainingEventServiceProvider extends ServiceProvider
         \App\Events\Training\EndorsementRequestCreated::class => [
             \App\Listeners\Training\Endorsement\NotifyEndorsementRequestCreated::class,
         ],
+        \App\Events\Training\Exams\PracticalExamCompleted::class => [
+            \App\Listeners\Training\Exams\NotifyStaffPracticalExamCompleted::class,
+            \App\Listeners\Training\Exams\NotifyStudentPracticalExamCompleted::class,
+            \App\Listeners\Training\Exams\NotifyDiscordPracticalExamSuccess::class,
+        ],
+        \App\Events\Training\Exams\ExamAccepted::class => [
+            \App\Listeners\Training\Exams\NotifyStudentExamAccepted::class,
+            \App\Listeners\Training\Exams\NotifyExaminersExamAccepted::class,
+            \App\Listeners\Training\Exams\CreateCtsBookingEntry::class,
+        ],
     ];
 
     /**

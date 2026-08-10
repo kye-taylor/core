@@ -6,7 +6,6 @@ Route::group([
 ], function () {
     Route::get('/')->uses('HomePageController')->name('home');
     Route::get('/join')->uses('JoinPageController')->name('join');
-    Route::get('/staff')->uses('StaffPageController@staff')->name('staff');
     Route::get('/airports')->uses('AirportController@index')->name('airports');
     Route::get('/airports/{ukAirportByICAO}')->uses('AirportController@show')->name('airport.view');
     Route::get('/VATSIM_UK_Sector_Provider.txt')->uses('EuroScopeSectorProvider');
@@ -47,7 +46,6 @@ Route::group([
         'as' => 'community.',
         'prefix' => 'community',
     ], function () {
-        Route::get('/vt-guide')->uses('CommunityPagesController@viewVtGuide')->name('vt-guide');
         Route::get('/teamspeak')->uses('CommunityPagesController@viewTeamspeak')->name('teamspeak');
     });
 
@@ -58,10 +56,18 @@ Route::group([
         Route::get('/division-policy')->uses('PolicyPagesController@viewDivision')->name('division');
         Route::get('/atc-training-policy')->uses('PolicyPagesController@viewATCTraining')->name('atc-training');
         Route::get('/visiting-and-transferring-policy')->uses('PolicyPagesController@viewVisitTransfer')->name('visiting-and-transferring');
-        Route::get('/terms-and-conditions')->uses('PolicyPagesController@viewTerms')->name('terms');
+        Route::get('/community-standards')->uses('PolicyPagesController@viewCommunityStandards')->name('community-standards');
         Route::get('/privacy-policy')->uses('PolicyPagesController@viewPrivacy')->name('privacy');
         Route::get('/data-protection-policy')->uses('PolicyPagesController@viewDPP')->name('data-protection');
         Route::get('/branding-guidelines')->uses('PolicyPagesController@viewBranding')->name('branding');
-        Route::get('/streaming-guidelines')->uses('PolicyPagesController@viewStreaming')->name('streaming');
+        Route::group([
+            'as' => 'training.',
+            'prefix' => 'training',
+        ], function () {
+            Route::get('/s1-syllabus')->uses('PolicyPagesController@viewS1Syllabus')->name('s1-syllabus');
+            Route::get('/s2-syllabus')->uses('PolicyPagesController@viewS2Syllabus')->name('s2-syllabus');
+            Route::get('/s3-syllabus')->uses('PolicyPagesController@viewS3Syllabus')->name('s3-syllabus');
+            Route::get('/c1-syllabus')->uses('PolicyPagesController@viewC1Syllabus')->name('c1-syllabus');
+        });
     });
 });

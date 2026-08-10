@@ -6,20 +6,22 @@ use App\Filament\Admin\Helpers\Pages\BasePage;
 use App\Filament\Pages\PilotTraining\Js;
 use App\Services\Admin\PilotTrainingStats;
 use Carbon\Carbon;
-use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Concerns\InteractsWithForms;
+use Filament\Forms\Contracts\HasForms;
+use Filament\Schemas\Components\Grid;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-class GeneratePilotQuarterlyStats extends BasePage
+class GeneratePilotQuarterlyStats extends BasePage implements HasForms
 {
     use InteractsWithForms;
 
-    protected static ?string $navigationIcon = 'heroicon-o-chart-bar';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-chart-bar';
 
-    protected static ?string $navigationGroup = 'Pilot Training';
+    protected static string|\UnitEnum|null $navigationGroup = 'Pilot Training';
 
-    protected static string $view = 'filament.pages.pilot-training.generate-pilot-quarterly-stats';
+    protected string $view = 'filament.pages.pilot-training.generate-pilot-quarterly-stats';
 
     protected static ?string $navigationLabel = 'Quarterly Stats';
 
@@ -27,7 +29,7 @@ class GeneratePilotQuarterlyStats extends BasePage
 
     public ?string $year = null;
 
-    /** @var \Illuminate\Support\Collection|null */
+    /** @var Collection|null */
     public $statistics = null;
 
     private $quarterMappings = ['01-01' => 'Q1', '04-01' => 'Q2', '07-01' => 'Q3', '10-01' => 'Q4'];
@@ -43,7 +45,7 @@ class GeneratePilotQuarterlyStats extends BasePage
         $yearOptions = range(now()->year, 2016, -1);
 
         return [
-            Grid::make()->schema([
+            Grid::make()->columnSpanFull()->schema([
                 Select::make('quarter')
                     ->required()
                     ->inOptions()
@@ -73,6 +75,11 @@ class GeneratePilotQuarterlyStats extends BasePage
                 ['name' => 'P2 Sessions', 'value' => PilotTrainingStats::sessionCount($startDate, $endDate, 'P2_SEIR(A)')],
                 ['name' => 'P2 OTS Sessions', 'value' => PilotTrainingStats::sessionCount($startDate, $endDate, 'P2_SEIR(A)_MEN')],
                 ['name' => 'P2 Exams (total / passes)', 'value' => PilotTrainingStats::examCount($startDate, $endDate, 'P2')],
+            ],
+            'P3' => [
+                ['name' => 'P3 Sessions', 'value' => PilotTrainingStats::sessionCount($startDate, $endDate, 'P3_CMEL(A)')],
+                ['name' => 'P3 OTS Sessions', 'value' => PilotTrainingStats::sessionCount($startDate, $endDate, 'P3_CMEL(A)_MEN')],
+                ['name' => 'P3 Exams (total / passes)', 'value' => PilotTrainingStats::examCount($startDate, $endDate, 'P3')],
             ],
             'TFP' => [
                 ['name' => 'TFP Sessions', 'value' => PilotTrainingStats::sessionCount($startDate, $endDate, 'TFP_FLIGHT')],
@@ -153,5 +160,10 @@ class GeneratePilotQuarterlyStats extends BasePage
 
         $quarter = $this->quarterMappings[$this->quarter];
         $this->dispatch('download-csv', filename: "pilot-training_{$this->year}_{$quarter}.csv", csv: $csvData);
+    }
+
+    protected static function canUse(): bool
+    {
+        return auth()->user()->can('pilot.access');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Policies\VisitTransfer;
 
+use App\Enums\VTCheckStatus;
 use App\Models\Mship\Account;
 use App\Models\VisitTransfer\Application;
 use Illuminate\Auth\Access\HandlesAuthorization;
@@ -19,9 +20,53 @@ class ApplicationPolicy
         }
     }
 
+    public function viewAny(Account $user)
+    {
+        return $user->can('vt.application.view.*');
+    }
+
+    public function view(Account $user, Application $application)
+    {
+        return $user->can("vt.application.view.{$application->id}") || $user->id === $application->account_id;
+    }
+
+    public function accept(Account $user, Application $application)
+    {
+        return $user->can('vt.application.accept.*')
+        && $application->can_accept
+        && $this->checkIsSatisfied($application->check_outcome_90_day)
+        && $this->checkIsSatisfied($application->check_outcome_50_hours);
+    }
+
+    public function reject(Account $user, Application $application)
+    {
+        return $user->can('vt.application.reject.*') && $application->can_reject;
+    }
+
+    public function complete(Account $user, Application $application)
+    {
+        return $user->can('vt.application.complete.*') && $application->is_accepted;
+    }
+
+    public function cancel(Account $user, Application $application)
+    {
+        return $user->can('vt.application.cancel.*') && $application->is_accepted;
+    }
+
+    public function overrideChecks(Account $user, Application $application)
+    {
+        return $user->can('vt.application.accept.*')
+        && $application->can_accept
+        && (! $this->checkIsSatisfied($application->check_outcome_90_day) || ! $this->checkIsSatisfied($application->check_outcome_50_hours));
+    }
+
+    public function changeFacility(Account $user, Application $application)
+    {
+        return $user->can('vt.application.modify.*') && ($application->can_accept || $application->can_reject || $application->is_accepted);
+    }
+
     public function create(Account $user, Application $application)
     {
-        // If they are currently a division member, they are not authorised.
         if ($user->hasState('DIVISION')) {
             return false;
         }
@@ -69,38 +114,6 @@ class ApplicationPolicy
         return true;
     }
 
-    public function addReferee(Account $user, Application $application)
-    {
-        if (! $application->facility || ! $application->is_editable) {
-            return false;
-        }
-
-        if ($application->references_required === 0) {
-            return false;
-        }
-
-        if ($application->statement == null && $application->statement_required) {
-            return false;
-        }
-
-        return true;
-    }
-
-    public function deleteReferee(Account $user, Application $application)
-    {
-        $reference = \Request::route('reference');
-
-        if (! $application->facility || ! $application->is_editable) {
-            return false;
-        }
-
-        if ($reference->application->account->id != $user->id) {
-            return false;
-        }
-
-        return true;
-    }
-
     public function submitApplication(Account $user, Application $application)
     {
         if (! $application->facility || ! $application->is_editable) {
@@ -108,10 +121,6 @@ class ApplicationPolicy
         }
 
         if ($application->statement == null && $application->statement_required) {
-            return false;
-        }
-
-        if ($application->number_references_required_relative > 0) {
             return false;
         }
 
@@ -131,43 +140,6 @@ class ApplicationPolicy
         return true;
     }
 
-    public function viewApplication(Account $user, Application $application)
-    {
-        return $application->exists && $user->id == $application->account_id;
-    }
-
-    public function accept(Account $user, Application $application)
-    {
-        if ($application->check_outcome_90_day === 0 || $application->check_outcome_90_day === null) {
-            return false;
-        }
-
-        if ($application->check_outcome_50_hours === 0 || $application->check_outcome_50_hours === null) {
-            return false;
-        }
-
-        if (! $application->can_accept) {
-            return false;
-        }
-
-        return true;
-    }
-
-    public function reject(Account $user, Application $application)
-    {
-        return $application->can_reject;
-    }
-
-    public function complete(Account $user, Application $application)
-    {
-        return $application->is_accepted;
-    }
-
-    public function cancel(Account $user, Application $application)
-    {
-        return $application->is_accepted;
-    }
-
     public function checkOutcome(Account $user, Application $application)
     {
         return $application->is_open;
@@ -176,5 +148,10 @@ class ApplicationPolicy
     public function settingToggle(Account $user, Application $application)
     {
         return $application->is_editable;
+    }
+
+    private function checkIsSatisfied(?VTCheckStatus $status): bool
+    {
+        return $status === VTCheckStatus::Passed || $status === VTCheckStatus::NotRequired;
     }
 }

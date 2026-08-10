@@ -45,11 +45,15 @@ class BanModified extends Notification implements ShouldQueue
      * Get the mail representation of the notification.
      *
      * @param  mixed  $notifiable
-     * @return \Illuminate\Notifications\Messages\MailMessage
+     * @return MailMessage
      */
     public function toMail($notifiable)
     {
         $subject = 'Account Ban Modified';
+
+        $banTotalLength = $this->ban->period_finish
+            ? human_diff_string($this->ban->period_start, $this->ban->period_finish)
+            : 'Permanent';
 
         return (new MailMessage)
             ->from(config('mail.from.address'), 'VATSIM UK - Community Department')
@@ -57,7 +61,7 @@ class BanModified extends Notification implements ShouldQueue
             ->view('emails.mship.account.ban.modified', [
                 'account' => $this->ban->account,
                 'ban' => $this->ban,
-                'ban_total_length' => human_diff_string($this->ban->period_start, $this->ban->period_finish),
+                'ban_total_length' => $banTotalLength,
                 'recipient' => $notifiable,
                 'subject' => $subject,
             ]);

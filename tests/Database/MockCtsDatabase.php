@@ -2,12 +2,40 @@
 
 namespace Tests\Database;
 
+use Illuminate\Database\Query\Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class MockCtsDatabase
 {
+    public static function ensureCreated(): void
+    {
+        self::ensureDatabaseExists();
+
+        if (! Schema::connection('cts')->hasTable('members')) {
+            self::create();
+        }
+    }
+
+    public static function recreate(): void
+    {
+        self::ensureDatabaseExists();
+        self::destroy();
+        self::create();
+    }
+
+    public static function ensureDatabaseExists(): void
+    {
+        $databaseName = config('database.connections.cts.database');
+
+        DB::connection('mysql')->statement(sprintf('CREATE DATABASE IF NOT EXISTS `%s`', $databaseName));
+        DB::purge('cts');
+    }
+
     public static function create()
     {
+        self::ensureDatabaseExists();
+
         DB::connection('cts')->statement("SET SESSION sql_mode='NO_ZERO_IN_DATE';");
 
         DB::connection('cts')->statement(
@@ -237,7 +265,7 @@ class MockCtsDatabase
 
         DB::connection('cts')->statement(
             "CREATE TABLE `sessions` (
-              `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+              `id` int unsigned NOT NULL AUTO_INCREMENT,
               `rts_id` smallint unsigned NOT NULL DEFAULT '0',
               `position` varchar(20) NOT NULL DEFAULT '',
               `progress_sheet_id` mediumint NOT NULL,
@@ -298,13 +326,284 @@ class MockCtsDatabase
               PRIMARY KEY (`id`)
             ) ENGINE=InnoDB AUTO_INCREMENT=22 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
         );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `exam_book` (
+          `id` int unsigned NOT NULL AUTO_INCREMENT,
+          `rts_id` smallint unsigned NOT NULL DEFAULT '0',
+          `student_id` int unsigned NOT NULL DEFAULT '0',
+          `student_rating` tinyint unsigned NOT NULL DEFAULT '0',
+          `exam` enum('P1','P2','P3','P4','P5','P6','P7','P8','P9','OBS','TWR','APP','CTR','S3','C1','C3') NOT NULL DEFAULT 'TWR',
+          `position_1` varchar(10) NOT NULL DEFAULT '',
+          `position_2` varchar(10) DEFAULT NULL,
+          `date_1` date DEFAULT NULL,
+          `from_1` time DEFAULT NULL,
+          `to_1` time DEFAULT NULL,
+          `date_2` date DEFAULT NULL,
+          `from_2` time DEFAULT NULL,
+          `to_2` time DEFAULT NULL,
+          `date_3` date DEFAULT NULL,
+          `from_3` time DEFAULT NULL,
+          `to_3` time DEFAULT NULL,
+          `taken` tinyint unsigned DEFAULT '0',
+          `taken_date` date DEFAULT NULL,
+          `taken_from` time DEFAULT NULL,
+          `taken_to` time DEFAULT NULL,
+          `exmr_id` int unsigned DEFAULT NULL,
+          `exmr_rating` tinyint unsigned DEFAULT NULL,
+          `time_book` datetime DEFAULT NULL,
+          `time_taken` datetime DEFAULT NULL,
+          `book_done` tinyint unsigned DEFAULT '0',
+          `second_examiner_req` tinyint unsigned DEFAULT '0',
+          `pass` tinyint unsigned DEFAULT '0',
+          `finished` tinyint unsigned DEFAULT '0',
+          PRIMARY KEY (`id`),
+          KEY `student_id` (`student_id`)
+        ) ENGINE=InnoDB AUTO_INCREMENT=2739 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;");
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `practical_examiners` (
+              `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+              `examid` smallint unsigned NOT NULL DEFAULT '0',
+              `senior` int unsigned NOT NULL DEFAULT '0',
+              `other` int unsigned DEFAULT '0',
+              `trainee` int unsigned DEFAULT '0',
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=3010 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `exam_criteria` (
+            `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `exam` enum('OBS','TWR','APP','CTR','P1','P2','P3','P4','P5','P6','P7','P8','P9') NOT NULL DEFAULT 'TWR',
+            `criteria` longtext NOT NULL,
+            `deleted` tinyint unsigned DEFAULT '0',
+            PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=247 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `practical_criteria_assess` (
+              `id` mediumint unsigned NOT NULL AUTO_INCREMENT,
+              `examid` smallint unsigned NOT NULL DEFAULT '0',
+              `criteria_id` smallint unsigned NOT NULL DEFAULT '0',
+              `result` char(1) NOT NULL DEFAULT '',
+              `addnotes` tinyint unsigned DEFAULT '0',
+              `notes` longtext NOT NULL,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=38933 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `exam_setup` (
+                `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+                `rts_id` smallint unsigned NOT NULL DEFAULT '0',
+                `student_id` int unsigned NOT NULL DEFAULT '0',
+                `position_1` varchar(10) DEFAULT NULL,
+                `position_2` varchar(10) DEFAULT NULL,
+                `exam` char(3) NOT NULL DEFAULT '',
+                `setup_by` int unsigned NOT NULL DEFAULT '0',
+                `setup_date` datetime DEFAULT NULL,
+                `response` tinyint unsigned DEFAULT '0',
+                `deny_reason` longtext,
+                `dealt_by` int unsigned DEFAULT '0',
+                `dealt_date` datetime DEFAULT NULL,
+                `bookid` mediumint NOT NULL DEFAULT '0',
+                `booked` smallint unsigned DEFAULT '0',
+                PRIMARY KEY (`id`),
+                KEY `student_id` (`student_id`)
+              ) ENGINE=InnoDB AUTO_INCREMENT=2344 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `availability` (
+            `id` bigint NOT NULL AUTO_INCREMENT,
+            `student_id` int NOT NULL DEFAULT '0',
+            `type` enum('S','M') NOT NULL DEFAULT 'S',
+            `date` date NOT NULL DEFAULT '0000-00-00',
+            `from` time NOT NULL DEFAULT '00:00:00',
+            `to` time NOT NULL DEFAULT '00:00:00',
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `student_id` (`student_id`,`date`,`from`,`to`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=644790 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `theory_questions` (
+            `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `level` char(2) NOT NULL DEFAULT '',
+            `question` longtext NOT NULL,
+            `option_1` longtext NOT NULL,
+            `option_2` longtext NOT NULL,
+            `option_3` longtext NOT NULL,
+            `option_4` longtext NOT NULL,
+            `answer` tinyint unsigned NOT NULL DEFAULT '0',
+            `add_by` int unsigned NOT NULL DEFAULT '0',
+            `add_date` date NOT NULL DEFAULT '0000-00-00',
+            `edit_by` int unsigned DEFAULT '0',
+            `edit_date` datetime NOT NULL,
+            `deleted` tinyint unsigned DEFAULT '0',
+            `status` int NOT NULL DEFAULT '0',
+            PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=1476 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `theory_answers` (
+            `answer_id` bigint NOT NULL AUTO_INCREMENT,
+            `theory_id` mediumint NOT NULL,
+            `question_id` mediumint NOT NULL,
+            `question_no` tinyint NOT NULL DEFAULT '0',
+            `answer_given` tinyint(1) NOT NULL DEFAULT '0',
+            `answer_correct` tinyint(1) NOT NULL DEFAULT '0',
+            `correct` tinyint(1) NOT NULL DEFAULT '0',
+            `submitted` tinyint(1) NOT NULL DEFAULT '0',
+            `submitted_time` timestamp NULL DEFAULT '0000-00-00 00:00:00',
+            PRIMARY KEY (`answer_id`)
+            ) ENGINE=InnoDB AUTO_INCREMENT=479361 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `cancel_reason` (
+            `id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
+            `sesh_id` int unsigned NOT NULL DEFAULT '0',
+            `sesh_type` char(2) NOT NULL DEFAULT '',
+            `reason` longtext NOT NULL,
+            `used` tinyint(3) unsigned NOT NULL DEFAULT '0',
+            `reason_by` int(10) unsigned NOT NULL DEFAULT '0',
+            `date` datetime DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `sesh_id` (`sesh_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `reminders` (
+            `id` smallint(5) unsigned NOT NULL AUTO_INCREMENT,
+            `sesh_id` int(11) NOT NULL,
+            `sesh_type` char(1) NOT NULL DEFAULT '',
+            `who` char(3) NOT NULL DEFAULT '',
+            `reminder` char(3) NOT NULL DEFAULT '',
+            `reminder_date` datetime DEFAULT NULL,
+            `set` tinyint(3) unsigned NOT NULL DEFAULT '0',
+            `sent` tinyint(3) unsigned NOT NULL DEFAULT '0',
+            PRIMARY KEY (`id`),
+            KEY `sesh_search` (`sesh_id`, `sesh_type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `prog_sheet_name` (
+            `prog_sheet_id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `name` varchar(50) NOT NULL DEFAULT '',
+            `created_by` int unsigned NOT NULL DEFAULT '0',
+            `created_date` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+            `disabled` tinyint unsigned NOT NULL DEFAULT '0',
+            PRIMARY KEY (`prog_sheet_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `prog_sheet_categories` (
+            `catId` int NOT NULL AUTO_INCREMENT,
+            `prog_sheet_id` int NOT NULL,
+            `catName` varchar(50) NOT NULL DEFAULT '',
+            `disabled` int NOT NULL DEFAULT '0',
+            PRIMARY KEY (`catId`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `prog_sheet_fields` (
+            `field_id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `prog_sheet_id` smallint unsigned NOT NULL DEFAULT '0',
+            `catId` int NOT NULL,
+            `groupId` int NOT NULL,
+            `field` varchar(300) NOT NULL DEFAULT '',
+            `created_by` int unsigned NOT NULL DEFAULT '0',
+            `created_date` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+            `disabled` tinyint unsigned NOT NULL DEFAULT '0',
+            PRIMARY KEY (`field_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `report_sheet` (
+            `id` mediumint unsigned NOT NULL AUTO_INCREMENT,
+            `seshid` int NOT NULL DEFAULT '0',
+            `student_id` int unsigned NOT NULL DEFAULT '0',
+            `prog_sheet_id` smallint unsigned NOT NULL DEFAULT '0',
+            `field_id` smallint unsigned NOT NULL DEFAULT '0',
+            `notes` longtext NOT NULL,
+            `field_score` tinyint unsigned NOT NULL DEFAULT '0',
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `report_notes` (
+            `id` int NOT NULL AUTO_INCREMENT,
+            `seshid` int NOT NULL DEFAULT '0',
+            `type` varchar(255) NOT NULL DEFAULT '',
+            `text` longtext NOT NULL,
+            PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `email_settings_rts` (
+            `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `member_id` int unsigned NOT NULL DEFAULT '0',
+            `rts_id` smallint unsigned NOT NULL DEFAULT '0',
+            `stu_seshconf` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_groupseshconf` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_seshacc` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_seshcancel` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_seshfail` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_avail` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_examconf` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_examacc` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_examcancel` tinyint unsigned NOT NULL DEFAULT '1',
+            `stu_examfail` tinyint unsigned NOT NULL DEFAULT '1',
+            `men_newsesh` tinyint unsigned NOT NULL DEFAULT '1',
+            `men_seshconf` tinyint unsigned NOT NULL DEFAULT '1',
+            `men_seshcancel` tinyint unsigned NOT NULL DEFAULT '1',
+            `men_seshfail` tinyint unsigned NOT NULL DEFAULT '1',
+            `rtsm_join` tinyint unsigned NOT NULL DEFAULT '1',
+            `updated` datetime DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `member_id` (`member_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
+
+        DB::connection('cts')->statement(
+            "CREATE TABLE `email_settings_gen` (
+            `id` smallint unsigned NOT NULL AUTO_INCREMENT,
+            `member_id` int unsigned NOT NULL DEFAULT '0',
+            `exam_new` tinyint unsigned NOT NULL DEFAULT '0',
+            `exam_conf` tinyint unsigned NOT NULL DEFAULT '0',
+            `exam_cancel` tinyint unsigned NOT NULL DEFAULT '0',
+            `exam_fail` tinyint unsigned NOT NULL DEFAULT '0',
+            `exam_fwd` tinyint unsigned NOT NULL DEFAULT '0',
+            `adm_unver` tinyint unsigned NOT NULL DEFAULT '0',
+            `adm_treex` tinyint unsigned NOT NULL DEFAULT '0',
+            `mem_hrts` tinyint(1) NOT NULL DEFAULT '0',
+            `updated` datetime DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `member_id` (`member_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        );
     }
 
     public static function destroy()
     {
-        DB::connection('cts')->statement(
-            'DROP TABLE IF EXISTS `members`;'
-        );
+        try {
+            DB::connection('cts')->statement(
+                'DROP TABLE IF EXISTS `members`;'
+            );
+        } catch (Exception) {
+            return;
+        }
 
         DB::connection('cts')->statement(
             'DROP TABLE IF EXISTS `bookings`;'
@@ -353,5 +652,45 @@ class MockCtsDatabase
         DB::connection('cts')->statement(
             'DROP TABLE IF EXISTS `rts`;'
         );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `exam_setup`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `exam_book`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `practical_examiners`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `exam_criteria`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `practical_criteria_assess`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `availability`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `theory_questions`;'
+        );
+
+        DB::connection('cts')->statement(
+            'DROP TABLE IF EXISTS `theory_answers`;'
+        );
+
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `prog_sheet_name`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `prog_sheet_categories`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `prog_sheet_fields`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `report_sheet`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `report_notes`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `email_settings_rts`;');
+        DB::connection('cts')->statement('DROP TABLE IF EXISTS `email_settings_gen`;');
     }
 }

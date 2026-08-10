@@ -26,9 +26,9 @@ class PolicyPagesTest extends TestCase
     }
 
     #[Test]
-    public function test_it_loads_the_terms()
+    public function test_it_loads_the_community_standards()
     {
-        $this->get(route('site.policy.terms'))->assertOk();
+        $this->get(route('site.policy.community-standards'))->assertOk();
     }
 
     #[Test]
@@ -50,8 +50,26 @@ class PolicyPagesTest extends TestCase
     }
 
     #[Test]
-    public function test_it_loads_the_streaming_page()
+    public function test_it_loads_the_s1_syllabus()
     {
-        $this->get(route('site.policy.streaming'))->assertOk();
+        $this->get(route('site.policy.training.s1-syllabus'))->assertOk();
+    }
+
+    #[Test]
+    public function test_it_loads_the_s2_syllabus()
+    {
+        $this->get(route('site.policy.training.s2-syllabus'))->assertOk();
+    }
+
+    #[Test]
+    public function test_it_loads_the_s3_syllabus()
+    {
+        $this->get(route('site.policy.training.s3-syllabus'))->assertOk();
+    }
+
+    #[Test]
+    public function test_it_loads_the_c1_syllabus()
+    {
+        $this->get(route('site.policy.training.c1-syllabus'))->assertOk();
     }
 }

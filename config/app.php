@@ -155,14 +155,13 @@ return [
         Laravel\Passport\PassportServiceProvider::class,
         Laravel\Tinker\TinkerServiceProvider::class,
         Bugsnag\BugsnagLaravel\BugsnagServiceProvider::class,
-        Barryvdh\Debugbar\ServiceProvider::class,
+        Fruitcake\LaravelDebugbar\ServiceProvider::class,
         Barryvdh\LaravelIdeHelper\IdeHelperServiceProvider::class,
-        Alawrence\Ipboard\ServiceProvider::class,
-
         /*
          * Application Service Providers...
          */
         App\Providers\AppServiceProvider::class,
+        App\Providers\FortifyServiceProvider::class,
         App\Providers\AuthServiceProvider::class,
         App\Providers\BroadcastServiceProvider::class,
         App\Providers\EventServiceProvider::class,
@@ -233,8 +232,7 @@ return [
         /*
          * Third Party Aliases
          */
-        'Debugbar' => Barryvdh\Debugbar\Facade::class,
-        'IPBoard' => Alawrence\Ipboard\Facades\Ipboard::class,
+        'Debugbar' => Fruitcake\LaravelDebugbar\Facades\Debugbar::class,
     ],
 
 ];

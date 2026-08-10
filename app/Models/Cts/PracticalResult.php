@@ -4,6 +4,8 @@ namespace App\Models\Cts;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PracticalResult extends Model
 {
@@ -15,9 +17,49 @@ class PracticalResult extends Model
 
     public const PASSED = 'P';
 
+    public const PARTIAL_PASS = 'S';
+
     public const FAILED = 'F';
+
+    public const INCOMPLETE = 'N';
+
+    public const FAILRESUBMIT = 'R'; // Legacy value, not used for new records
 
     protected $casts = [
         'date' => 'datetime',
     ];
+
+    public $guarded = [];
+
+    public function student(): BelongsTo
+    {
+        return $this->belongsTo(Member::class, 'student_id', 'id');
+    }
+
+    public function examBooking(): BelongsTo
+    {
+        return $this->belongsTo(ExamBooking::class, 'examid', 'id');
+    }
+
+    public function resultHuman(): string
+    {
+        return match ($this->result) {
+            self::PASSED => 'Passed',
+            self::PARTIAL_PASS => 'Partial Pass',
+            self::FAILED => 'Failed',
+            self::INCOMPLETE => 'Incomplete',
+            self::FAILRESUBMIT => 'Failed - Resubmit',
+            default => 'Unknown',
+        };
+    }
+
+    public function criteria(): HasMany
+    {
+        return $this->hasMany(ExamCriteriaAssessment::class, 'examid', 'examid')->with('examCriteria');
+    }
+
+    public function isPassed(): bool
+    {
+        return $this->result === self::PASSED;
+    }
 }

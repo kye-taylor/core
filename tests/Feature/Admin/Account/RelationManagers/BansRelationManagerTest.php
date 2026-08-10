@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Admin\Account\RelationManagers;
 
-use App\Filament\Admin\Resources\AccountResource\RelationManagers\BansRelationManager;
+use App\Filament\Admin\Resources\Accounts\RelationManagers\BansRelationManager;
 use App\Models\Mship\Account;
 use App\Models\Mship\Account\Ban;
 use App\Models\Mship\Ban\Reason;
@@ -55,6 +55,27 @@ class BansRelationManagerTest extends BaseAdminTestCase
             ->callTableAction('create', null, ['reason' => $reason, 'extra_info' => 'the extra info', 'note' => 'the note']);
 
         $this->assertDatabaseHas('mship_account_ban', ['account_id' => $account->id, 'banned_by' => $this->privacc->id, 'reason_id' => $reason, 'reason_extra' => 'the extra info']);
+        Notification::assertSentTo([$account], BanCreated::class);
+    }
+
+    public function test_it_can_create_permanent_ban()
+    {
+        Notification::fake();
+
+        $this->actingAsSuperUser();
+        $account = Account::factory()->create();
+        $reason = Reason::factory()->permanent()->create()->id;
+
+        Livewire::test(BansRelationManager::class, ['ownerRecord' => $account, 'pageClass' => ViewRecord::class])
+            ->callTableAction('create', null, ['reason' => $reason, 'extra_info' => 'permanent ban', 'note' => 'the note']);
+
+        $this->assertDatabaseHas('mship_account_ban', [
+            'account_id' => $account->id,
+            'banned_by' => $this->privacc->id,
+            'reason_id' => $reason,
+            'reason_extra' => 'permanent ban',
+            'period_finish' => null,
+        ]);
         Notification::assertSentTo([$account], BanCreated::class);
     }
 }

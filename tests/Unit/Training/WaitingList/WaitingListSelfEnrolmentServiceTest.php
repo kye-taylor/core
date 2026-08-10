@@ -2,11 +2,13 @@
 
 namespace Tests\Unit\Training\WaitingList;
 
+use App\Models\Atc\PositionGroup;
 use App\Models\Mship\Account;
 use App\Models\Mship\Qualification;
 use App\Models\Mship\State;
 use App\Models\NetworkData\Atc;
 use App\Models\Roster;
+use App\Models\Training\TrainingPlace\TrainingPlace;
 use App\Models\Training\WaitingList;
 use App\Services\Training\WaitingListSelfEnrolment;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -275,6 +277,58 @@ class WaitingListSelfEnrolmentServiceTest extends TestCase
         ]);
 
         $account->addQualification(Qualification::code('S1')->first());
+
+        $this->assertTrue(WaitingListSelfEnrolment::canAccountEnrolOnList($account, $waitingList));
+    }
+
+    public function test_cannot_enrol_when_holding_active_training_place()
+    {
+        $account = Account::factory()->create();
+        TrainingPlace::factory()->create([
+            'account_id' => $account->id,
+        ]);
+
+        $waitingList = WaitingList::factory()->create([
+            'self_enrolment_enabled' => true,
+            'home_members_only' => false,
+            'requires_roster_membership' => false,
+        ]);
+
+        $this->assertFalse(WaitingListSelfEnrolment::canAccountEnrolOnList($account, $waitingList));
+    }
+
+    public function test_cannot_enrol_when_required_endorsement_missing()
+    {
+        $account = Account::factory()->create();
+        $account->addState(State::findByCode('DIVISION'));
+
+        $positionGroup = PositionGroup::factory()->create();
+
+        $waitingList = WaitingList::factory()->create([
+            'self_enrolment_enabled' => true,
+            'requires_roster_membership' => false,
+            'required_endorsement_id' => $positionGroup->id,
+        ]);
+
+        $this->assertFalse(WaitingListSelfEnrolment::canAccountEnrolOnList($account, $waitingList));
+    }
+
+    public function test_can_enrol_when_required_endorsement_present()
+    {
+        $account = Account::factory()->create();
+        $account->addState(State::findByCode('DIVISION'));
+
+        $positionGroup = PositionGroup::factory()->create();
+        $account->endorsements()->create([
+            'endorsable_type' => PositionGroup::class,
+            'endorsable_id' => $positionGroup->id,
+        ]);
+
+        $waitingList = WaitingList::factory()->create([
+            'self_enrolment_enabled' => true,
+            'requires_roster_membership' => false,
+            'required_endorsement_id' => $positionGroup->id,
+        ]);
 
         $this->assertTrue(WaitingListSelfEnrolment::canAccountEnrolOnList($account, $waitingList));
     }

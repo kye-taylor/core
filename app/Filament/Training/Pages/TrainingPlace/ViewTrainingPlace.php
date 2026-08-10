@@ -1,0 +1,297 @@
+<?php
+
+namespace App\Filament\Training\Pages\TrainingPlace;
+
+use App\Filament\Training\Pages\Mentor\Base\BaseMentoringHistoryPage;
+use App\Filament\Training\Pages\TrainingPlace\Widgets\TrainingPlaceStatsWidget;
+use App\Filament\Training\Resources\TrainingPlaces\Pages\ListTrainingPlaces;
+use App\Models\Atc\Position;
+use App\Models\Cts\ExamBooking;
+use App\Models\Mship\Account;
+use App\Models\Training\TrainingPlace\TrainingPlace;
+use App\Models\Training\TrainingPosition\TrainingPosition;
+use App\Repositories\Cts\SessionRepository;
+use App\Services\Training\ExamForwardingService;
+use Exception;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Infolists\Components\IconEntry;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Concerns\InteractsWithInfolists;
+use Filament\Infolists\Contracts\HasInfolists;
+use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Callout;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+
+class ViewTrainingPlace extends BaseMentoringHistoryPage implements HasInfolists
+{
+    use InteractsWithInfolists;
+
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-document-text';
+
+    protected static bool $shouldRegisterNavigation = false;
+
+    protected string $view = 'filament.training.pages.view-training-place';
+
+    protected static ?string $slug = 'training-places/{trainingPlaceId}';
+
+    public TrainingPlace $trainingPlace;
+
+    public string $trainingPlaceId;
+
+    public function mount(): void
+    {
+        /** @var Account|null $user */
+        $user = Auth::user();
+
+        $this->trainingPlace = TrainingPlace::withTrashed()
+            ->where('id', $this->trainingPlaceId)
+            ->with([
+                'account',
+                'waitingListAccount',
+                'trainable' => fn (MorphTo $morphTo) => $morphTo->morphWith([TrainingPosition::class => ['position']]),
+            ])
+            ->firstOrFail();
+
+        if (! $user || ! $user->can('view', $this->trainingPlace)) {
+            abort(403, 'You do not have permission to view training places.');
+        }
+    }
+
+    public function getTitle(): string|Htmlable
+    {
+        $title = "View Training Place - {$this->trainingPlace->account->name}";
+        $callsign = $this->trainingPlace->trainingPosition?->position?->callsign;
+
+        if (filled($callsign)) {
+            $title .= " ({$callsign})";
+        }
+
+        return $title;
+    }
+
+    /**
+     * @return array<string, string>|array<int, string|Htmlable>
+     */
+    public function getBreadcrumbs(): array
+    {
+        return [
+            ListTrainingPlaces::getUrl() => 'Training Places',
+            $this->getTitle(),
+        ];
+    }
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            TrainingPlaceStatsWidget::make([
+                'trainingPlace' => $this->trainingPlace,
+            ]),
+        ];
+    }
+
+    protected function getHeaderActions(): array
+    {
+        $user = Auth::user();
+
+        return [
+            Action::make('forwardForExam')
+                ->label('Forward for Practical Exam')
+                ->icon('heroicon-o-arrow-right')
+                ->visible(fn () => ! $this->trainingPlace->trashed() && $user->can('training.exams.setup') && $this->trainingPlace->trainingPosition !== null)
+                ->disabled(fn () => $this->hasPendingExam())
+                ->tooltip(fn () => $this->hasPendingExam() ? 'This member already has a pending exam booking.' : 'Forward the member for a practical exam on their primary training position')
+                ->schema([
+                    Select::make('position_id')
+                        ->label('Position')
+                        ->options(fn () => Position::where('callsign', 'NOT LIKE', '%ATIS%')->orderBy('callsign')->pluck('callsign', 'id'))
+                        ->default(fn () => $this->trainingPlace->trainingPosition?->position?->id)
+                        ->required()
+                        ->searchable()
+                        ->preload(),
+                    TextInput::make('student_name')
+                        ->label('Student Name')
+                        ->default(fn () => $this->trainingPlace->account->name)
+                        ->readOnly()
+                        ->dehydrated(false),
+                    TextInput::make('student_cid')
+                        ->label('Student CID')
+                        ->default(fn () => $this->trainingPlace->account->id)
+                        ->readOnly()
+                        ->dehydrated(false),
+                ])
+                ->action(fn (array $data) => $this->forwardForExam($data['position_id']))
+                ->modalHeading('Forward for Practical Exam')
+                ->modalDescription('Confirm the details below to forward this member for a practical exam.')
+                ->modalSubmitActionLabel('Forward for Exam'),
+
+            Action::make('restoreTrainingPlace')
+                ->label('Restore Training Place')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('success')
+                ->visible(fn () => $this->trainingPlace->trashed() && $user->can('training-places.restore.*'))
+                ->modalHeading('Restore Training Place')
+                ->modalDescription('This will make the training place active again and re-assign mentoring permissions. The student will not be re-added to any waiting list.')
+                ->modalSubmitActionLabel('Restore')
+                ->requiresConfirmation()
+                ->action(function () {
+                    $displayName = $this->trainingPlace->display_name;
+
+                    $this->trainingPlace->restore();
+
+                    $this->trainingPlace->account->addNote('training', "Training place restored on {$displayName}.", Auth::user()->id);
+
+                    Notification::make()
+                        ->title('Training place restored successfully')
+                        ->success()
+                        ->send();
+
+                    $this->redirect(ListTrainingPlaces::getUrl());
+                }),
+
+            Action::make('revokeTrainingPlace')
+                ->label('Revoke Training Place')
+                ->icon('heroicon-o-x-circle')
+                ->color('danger')
+                ->visible(fn () => ! $this->trainingPlace->trashed() && $user->can('training-places.revoke.*'))
+                ->modalHeading('Revoke Training Place')
+                ->modalDescription('Are you sure you want to revoke this members training place?')
+                ->modalSubmitActionLabel('Revoke Training Place')
+                ->schema([
+                    Textarea::make('reason')
+                        ->label('Reason')
+                        ->placeholder('Please provide a reason for revoking this training place')
+                        ->rows(3)
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $this->trainingPlace->revokeTrainingPlace($data['reason'], Auth::user());
+
+                    Notification::make()
+                        ->title('Training place revoked successfully')
+                        ->success()
+                        ->send();
+
+                    $this->redirect(ListTrainingPlaces::getUrl());
+                }),
+        ];
+    }
+
+    private function hasPendingExam(): bool
+    {
+        $memberId = $this->trainingPlace->account->member?->id;
+
+        if (! $memberId) {
+            return false;
+        }
+
+        return ExamBooking::where('student_id', $memberId)
+            ->where('finished', ExamBooking::NOT_FINISHED_FLAG)
+            ->exists();
+    }
+
+    public function forwardForExam(int $positionId): void
+    {
+        try {
+            // Get the position from the provided ID
+            $trainingPosition = TrainingPosition::where('position_id', $positionId)->firstOrFail();
+            $ctsMember = $this->trainingPlace->account->member;
+
+            if (! $trainingPosition || ! $ctsMember) {
+                Notification::make()
+                    ->title('Error')
+                    ->danger()
+                    ->body('Unable to forward for exam - missing position or member information.')
+                    ->send();
+
+                return;
+            }
+
+            // Check if the member has an ATC qualification
+            if (! $ctsMember->account->qualification_atc) {
+                Notification::make()
+                    ->title('Error')
+                    ->danger()
+                    ->body('Unable to forward for exam - member does not have a valid ATC qualification.')
+                    ->send();
+
+                return;
+            }
+
+            /** @var Account|null $user */
+            $user = Auth::user();
+
+            // Use the service to forward for exam
+            $service = new ExamForwardingService;
+            $service->forwardForExam($ctsMember, $trainingPosition, $user->id);
+
+            Notification::make()
+                ->title('Success')
+                ->success()
+                ->body('Exam setup for '.($trainingPosition->exam_callsign ?? $trainingPosition->position->callsign).' has been created.')
+                ->send();
+        } catch (Exception $e) {
+            Log::error('Training place forward for exam failed', ['exception' => $e, 'training_place_id' => $this->trainingPlace->id]);
+
+            Notification::make()
+                ->title('Error')
+                ->danger()
+                ->body('An error occurred while forwarding for exam: '.$e->getMessage())
+                ->send();
+        }
+    }
+
+    public function infolist(Schema $schema): Schema
+    {
+        return $schema->record($this->trainingPlace)->components([
+            Callout::make('This training place is inactive')
+                ->icon('heroicon-o-exclamation-triangle')
+                ->danger()
+                ->description(fn () => 'This training place has been removed and it is now inactive. Removed on '.$this->trainingPlace->deleted_at?->format('d/m/Y \a\t H:i').'.')
+                ->visible(fn (): bool => (bool) $this->trainingPlace->deleted_at)
+                ->columnSpanFull(),
+            Section::make('Training Place Details')->columnSpanFull()->schema([
+                TextEntry::make('account.name')->label('Name'),
+                TextEntry::make('account.id')->label('CID'),
+                TextEntry::make('display_name')
+                    ->label(fn (): string => $this->trainingPlace->trainable_type_label)
+                    ->state(fn (): string => $this->trainingPlace->trainingPosition?->position?->name ?? $this->trainingPlace->display_name),
+                TextEntry::make('created_at')->label('Training Start')->date('d/m/Y'),
+                TextEntry::make('waitingListAccount.created_at')
+                    ->label('Waiting List Join Date')
+                    ->date('d/m/Y')
+                    ->visible(fn (): bool => (bool) $this->trainingPlace->waiting_list_account_id),
+                IconEntry::make('has_pending_exam')
+                    ->label('Has Pending Exam Booking')
+                    ->getStateUsing(fn () => $this->hasPendingExam())
+                    ->boolean(),
+            ])->columns(2),
+        ]);
+    }
+
+    protected function tableHeading(): ?string
+    {
+        return 'Mentoring session history';
+    }
+
+    protected function getSessionQuery(): Builder
+    {
+        return (new SessionRepository)->getAllAcceptedSessionsForPositionsQuery(
+            $this->trainingPlace->trainableCtsPositions(),
+            $this->trainingPlace->account->member?->id ?? 0
+        );
+    }
+
+    protected function showStudentFilter(): bool
+    {
+        return false;
+    }
+}

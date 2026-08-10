@@ -2,7 +2,7 @@
 
 namespace Tests\Feature\Admin\Account\Pages;
 
-use App\Filament\Admin\Resources\AccountResource\Pages\ViewAccount;
+use App\Filament\Admin\Resources\Accounts\Pages\ViewAccount;
 use App\Jobs\UpdateMember;
 use App\Models\Mship\Note\Type;
 use App\Models\Mship\State;
@@ -70,11 +70,33 @@ class ViewAccountPageTest extends BaseAdminTestCase
 
         Livewire::actingAs($this->user);
         Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
-            ->assertFormFieldIsHidden('email');
+            ->assertDontSee('Primary Email')
+            ->assertDontSee('Secondary Emails');
 
         $this->user->givePermissionTo('account.view-sensitive.*');
         Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
-            ->assertFormFieldExists('email');
+            ->assertSee('Primary Email')
+            ->assertSee('Secondary Emails');
+    }
+
+    public function test_roster_status_shows_active_when_on_roster_and_inactive_when_not(): void
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+
+        Livewire::actingAs($this->user);
+
+        // Not on roster
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
+            ->assertSee('Roster Status')
+            ->assertSee('Inactive');
+
+        // On roster
+        $this->privacc->addState(State::findByCode('DIVISION'));
+        Roster::create(['account_id' => $this->privacc->getKey()]);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->assertSee('Roster Status')
+            ->assertSee('Active');
     }
 
     public function test_cant_see_ban_relation_manager_without_permission()
@@ -198,5 +220,159 @@ class ViewAccountPageTest extends BaseAdminTestCase
         Livewire::actingAs($this->user)
             ->test(ViewAccount::class, ['record' => $this->privacc->refresh()->getKey()])
             ->assertActionHidden('roster_restriction_remove');
+    }
+
+    public function test_it_returns_the_most_recent_uk_atc_session_disconnect_time()
+    {
+        $olderSession = factory(\App\Models\NetworkData\Atc::class)
+            ->states('offline')
+            ->create(['account_id' => $this->privacc->id, 'disconnected_at' => now()->subDays(2)]);
+
+        $newerSession = factory(\App\Models\NetworkData\Atc::class)
+            ->states('offline')
+            ->create(['account_id' => $this->privacc->id, 'disconnected_at' => now()->subHour()]);
+
+        $lastSeen = $this->privacc->lastSeenControllingUK();
+
+        $this->assertNotNull($lastSeen);
+        $this->assertTrue($lastSeen->equalTo($newerSession->disconnected_at));
+    }
+
+    public function test_it_returns_null_when_no_uk_atc_sessions_exist()
+    {
+        $this->assertNull($this->privacc->lastSeenControllingUK());
+    }
+
+    public function test_cant_revoke_visiting_status_without_permission()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->privacc->addState(State::findByCode('VISITING'));
+
+        Livewire::actingAs($this->user);
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
+            ->assertActionHidden('revoke_visiting_status');
+    }
+
+    public function test_can_revoke_visiting_status_when_permitted()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.revoke');
+
+        $this->privacc->addState(State::findByCode('VISITING'));
+
+        Livewire::actingAs($this->user);
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->assertActionVisible('revoke_visiting_status')
+            ->callAction('revoke_visiting_status');
+
+        $this->assertFalse($this->privacc->fresh()->hasState('VISITING'));
+    }
+
+    public function test_revoke_visiting_status_creates_a_note()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.revoke');
+
+        $this->privacc->addState(State::findByCode('VISITING'));
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->callAction('revoke_visiting_status');
+
+        $this->assertDatabaseHas('mship_account_note', [
+            'account_id' => $this->privacc->id,
+            'writer_id' => $this->user->id,
+            'content' => 'Visiting status revoked by '.$this->user->name,
+        ]);
+    }
+
+    public function test_revoke_visiting_status_not_visible_without_visiting_state()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.revoke');
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
+            ->assertActionHidden('revoke_visiting_status');
+    }
+
+    public function test_cant_give_manual_visiting_status_without_permission()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+
+        Livewire::actingAs($this->user);
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
+            ->assertActionHidden('grant_visiting_status');
+    }
+
+    public function test_can_give_manual_visiting_status_with_permission()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.grant.manual');
+
+        Livewire::actingAs($this->user);
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->id])
+            ->assertActionVisible('grant_visiting_status')
+            ->callAction('grant_visiting_status', ['reason' => 'Test reason for granting visiting status']);
+
+        $this->assertTrue($this->privacc->fresh()->hasState('VISITING'));
+    }
+
+    public function test_grant_manual_visiting_status_creates_a_note()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.grant.manual');
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->callAction('grant_visiting_status', ['reason' => 'Test reason for granting visiting status']);
+
+        $this->assertDatabaseHas('mship_account_note', [
+            'account_id' => $this->privacc->id,
+            'writer_id' => $this->user->id,
+            'content' => 'Visiting status granted manually: Test reason for granting visiting status',
+        ]);
+    }
+
+    public function test_grant_manual_visiting_status_not_visible_with_visiting_state()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.grant.manual');
+
+        $this->privacc->addState(State::findByCode('VISITING'));
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->assertActionHidden('grant_visiting_status');
+    }
+
+    public function test_grant_manual_visiting_status_not_visible_with_transferring_state()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.grant.manual');
+
+        $this->privacc->addState(State::findByCode('TRANSFERRING'));
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->assertActionHidden('grant_visiting_status');
+    }
+
+    public function test_grant_manual_visiting_status_not_visible_with_division_state()
+    {
+        $this->user->givePermissionTo('account.view-insensitive.*');
+        $this->user->givePermissionTo('vt.status.grant.manual');
+
+        $this->privacc->addState(State::findByCode('DIVISION'));
+
+        Livewire::actingAs($this->user);
+
+        Livewire::test(ViewAccount::class, ['record' => $this->privacc->refresh()->id])
+            ->assertActionHidden('grant_visiting_status');
     }
 }

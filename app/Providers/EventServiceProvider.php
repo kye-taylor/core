@@ -4,11 +4,11 @@ namespace App\Providers;
 
 use App\Events\Discord\DiscordLinked;
 use App\Events\Discord\DiscordUnlinked;
-use App\Events\NetworkData\AtcSessionEnded;
 use App\Listeners\Discord\RemoveDiscordUser;
 use App\Listeners\Discord\SetupDiscordUser;
-use App\Listeners\NetworkData\FlushEndorsementCache;
+use App\Listeners\Mship\CheckEmailPreferences;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
+use Illuminate\Notifications\Events\NotificationSending;
 
 class EventServiceProvider extends ServiceProvider
 {
@@ -22,31 +22,16 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\Training\WaitingList\CheckWaitingListAccountMshipState::class,
         ],
 
-        \App\Events\Mship\Qualifications\QualificationAdded::class => [
-            \App\Listeners\Mship\SendS1Email::class,
-        ],
-
-        \App\Events\Mship\Bans\BanUpdated::class => [
-            \App\Listeners\Sync\Bans\SyncBanToForum::class,
-        ],
-
         \App\Events\Mship\Feedback\NewFeedbackEvent::class => [
             // \App\Listeners\Mship\Feedback\NotifyOfNewFeedback::class,
         ],
 
-        AtcSessionEnded::class => [
-            // AtcSessionRecordedSuccessNotification::class,
-            FlushEndorsementCache::class,
-        ],
-
         \App\Events\VisitTransfer\ApplicationSubmitted::class => [
             \App\Listeners\VisitTransfer\NotifyApplicantOfStatusChange::class,
-            \App\Listeners\VisitTransfer\NotifyAllReferees::class,
         ],
 
         \App\Events\VisitTransfer\ApplicationUnderReview::class => [
             \App\Listeners\VisitTransfer\NotifyApplicantOfStatusChange::class,
-            \App\Listeners\VisitTransfer\NotifyCommunityOfUnderReviewApplication::class,
         ],
 
         \App\Events\VisitTransfer\ApplicationRejected::class => [
@@ -55,7 +40,6 @@ class EventServiceProvider extends ServiceProvider
 
         \App\Events\VisitTransfer\ApplicationAccepted::class => [
             \App\Listeners\VisitTransfer\NotifyApplicantOfStatusChange::class,
-            \App\Listeners\VisitTransfer\NotifyTrainingDepartmentOfAcceptedApplication::class,
             \App\Listeners\VisitTransfer\SyncVisitingControllerToCts::class,
         ],
 
@@ -75,27 +59,6 @@ class EventServiceProvider extends ServiceProvider
             \App\Listeners\VisitTransfer\NotifyApplicantOfStatusChange::class,
         ],
 
-        \App\Events\VisitTransfer\ReferenceCancelled::class => [
-            \App\Listeners\VisitTransfer\NotifyRefereeOfReferenceCancellation::class,
-        ],
-
-        \App\Events\VisitTransfer\ReferenceUnderReview::class => [
-            \App\Listeners\VisitTransfer\NotifyRefereeOfReferenceCompletion::class,
-            \App\Listeners\VisitTransfer\NotifyApplicantOfReferenceCompletion::class,
-        ],
-
-        \App\Events\VisitTransfer\ReferenceAccepted::class => [
-            \App\Listeners\VisitTransfer\NotifyApplicantOfReferenceAcceptance::class,
-        ],
-
-        \App\Events\VisitTransfer\ReferenceRejected::class => [
-            \App\Listeners\VisitTransfer\NotifyApplicantOfReferenceRejection::class,
-        ],
-
-        \App\Events\VisitTransfer\ReferenceDeleted::class => [
-            \App\Listeners\VisitTransfer\NotifyRefereeOfReferenceDeletion::class,
-        ],
-
         DiscordLinked::class => [
             SetupDiscordUser::class,
         ],
@@ -105,9 +68,22 @@ class EventServiceProvider extends ServiceProvider
         ],
         \App\Events\Mship\Endorsement\TierEndorsementAdded::class => [
             \App\Listeners\Mship\Endorsement\NotifyOfTierEndorsement::class,
+            \App\Listeners\Mship\Endorsement\AnnounceTierEndorsement::class,
         ],
         \App\Events\Mship\Endorsement\PositionEndorsementAdded::class => [
             \App\Listeners\Mship\Endorsement\NotifyOfPositionEndorsement::class,
+        ],
+
+        NotificationSending::class => [
+            CheckEmailPreferences::class,
+        ],
+
+        \App\Events\NetworkData\AtcSessionStarted::class => [
+            \App\Listeners\TeamSpeak\AssignAtcServerGroup::class,
+        ],
+
+        \App\Events\NetworkData\AtcSessionEnded::class => [
+            \App\Listeners\TeamSpeak\RemoveAtcServerGroup::class,
         ],
     ];
 

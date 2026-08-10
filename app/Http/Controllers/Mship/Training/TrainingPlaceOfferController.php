@@ -1,0 +1,73 @@
+<?php
+
+namespace App\Http\Controllers\Mship\Training;
+
+use App\Enums\TrainingPlaceOfferStatus;
+use App\Models\Training\TrainingPlace\TrainingPlaceOffer;
+use App\Models\Training\TrainingPosition\TrainingPosition;
+use App\Services\Training\TrainingPlaceOfferService;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+
+class TrainingPlaceOfferController extends \App\Http\Controllers\BaseController
+{
+    public function accept(string $token, TrainingPlaceOfferService $service)
+    {
+        $offer = $this->findOffer($token);
+
+        if ($offer->waitingListAccount->account->id !== auth()->id()) {
+            abort(403);
+        }
+
+        if ($offer->isExpired) {
+            return $this->expired($offer);
+        }
+
+        if ($offer->status !== TrainingPlaceOfferStatus::Pending) {
+            return $this->alreadyResponded($offer);
+        }
+
+        $service->acceptOffer($offer);
+
+        return view('training.training-place-offer.result', ['result' => 'accepted', 'offer' => $offer]);
+    }
+
+    public function decline(string $token, TrainingPlaceOfferService $service)
+    {
+        $offer = $this->findOffer($token);
+
+        if ($offer->waitingListAccount->account->id !== auth()->id()) {
+            abort(403);
+        }
+
+        if ($offer->isExpired) {
+            return $this->expired($offer);
+        }
+
+        if ($offer->status !== TrainingPlaceOfferStatus::Pending) {
+            return $this->alreadyResponded($offer);
+        }
+
+        $service->declineOffer($offer);
+
+        return view('training.training-place-offer.result', ['result' => 'declined', 'offer' => $offer]);
+    }
+
+    private function findOffer(string $token): TrainingPlaceOffer
+    {
+        return TrainingPlaceOffer::with([
+            'waitingListAccount' => fn ($q) => $q->withTrashed(),
+            'waitingListAccount.account',
+            'trainable' => fn (MorphTo $morphTo) => $morphTo->morphWith([TrainingPosition::class => ['position']]),
+        ])->where('token', $token)->firstOrFail();
+    }
+
+    private function alreadyResponded(TrainingPlaceOffer $offer)
+    {
+        return view('training.training-place-offer.already-responded', compact('offer'));
+    }
+
+    private function expired(TrainingPlaceOffer $offer)
+    {
+        return view('training.training-place-offer.expired', compact('offer'));
+    }
+}

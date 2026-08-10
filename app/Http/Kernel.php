@@ -17,8 +17,9 @@ class Kernel extends HttpKernel
     protected $middleware = [
         \Illuminate\Foundation\Http\Middleware\CheckForMaintenanceMode::class,
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
-        \App\Http\Middleware\TrimStrings::class,
+        Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+        Middleware\SecurityHeaders::class,
     ];
 
     /**
@@ -29,16 +30,16 @@ class Kernel extends HttpKernel
     protected $middlewareGroups = [
         'web' => [
             // native
-            \App\Http\Middleware\EncryptCookies::class,
+            Middleware\EncryptCookies::class,
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
             \Illuminate\Session\Middleware\AuthenticateSession::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
-            \App\Http\Middleware\VerifyCsrfToken::class,
+            Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
 
             // custom
-            \App\Http\Middleware\TrackInactivity::class,
+            Middleware\TrackInactivity::class,
         ],
         'api' => [
             'throttle:60,1',
@@ -52,6 +53,7 @@ class Kernel extends HttpKernel
             'auth',
             'auth.record-info',
             'mandatorypasswords',
+            'mandatorytwofactor',
             'denyifbanned',
             'user.must.read.notifications',
             'redirecttointended',
@@ -67,19 +69,21 @@ class Kernel extends HttpKernel
      */
     protected $routeMiddleware = [
         // native
-        'auth' => \App\Http\Middleware\Authenticate::class,
+        'auth' => Middleware\Authenticate::class,
         'auth.basic' => \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
         'bindings' => \Illuminate\Routing\Middleware\SubstituteBindings::class,
         'can' => \Illuminate\Auth\Middleware\Authorize::class,
-        'guest' => \App\Http\Middleware\RedirectIfAuthenticated::class,
+        'guest' => Middleware\RedirectIfAuthenticated::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
 
         // custom
         'admin' => Middleware\CheckAdminPermissions::class,
         'user.must.read.notifications' => Middleware\UserMustReadNotifications::class,
-        'api.tracking' => \App\Http\Middleware\ApiTracking::class,
+        'api.tracking' => Middleware\ApiTracking::class,
         'denyifbanned' => Middleware\DenyIfBanned::class,
         'mandatorypasswords' => Middleware\MandatoryPasswords::class,
+        'mandatorytwofactor' => Middleware\MandatoryTwoFactor::class,
+        'password.confirm' => Middleware\RequirePasswordConfirmation::class,
         'redirecttointended' => Middleware\RedirectToIntended::class,
         'auth.record-info' => RecordLoginInfo::class,
     ];
@@ -95,8 +99,8 @@ class Kernel extends HttpKernel
         \Illuminate\Session\Middleware\StartSession::class,
         \Illuminate\View\Middleware\ShareErrorsFromSession::class,
         \Illuminate\Session\Middleware\AuthenticateSession::class,
-        \App\Http\Middleware\TrackInactivity::class,
-        \App\Http\Middleware\Authenticate::class,
+        Middleware\TrackInactivity::class,
+        Middleware\Authenticate::class,
         \Illuminate\Routing\Middleware\SubstituteBindings::class,
         \Illuminate\Auth\Middleware\Authorize::class,
     ];

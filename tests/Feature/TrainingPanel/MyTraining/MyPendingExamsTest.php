@@ -1,0 +1,252 @@
+<?php
+
+namespace Tests\Feature\TrainingPanel\MyTraining;
+
+use App\Livewire\Training\MyPendingExamsTable;
+use App\Models\Cts\ExamBooking;
+use App\Models\Cts\ExamSetup;
+use App\Models\Cts\Member;
+use App\Models\Cts\PracticalExaminers;
+use App\Models\Mship\Account;
+use App\Models\Mship\Qualification;
+use App\Notifications\Training\Exams\ExamCancelledExaminerNotification;
+use App\Notifications\Training\Exams\ExamCancelledStudentNotification;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\View;
+use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\Test;
+use Spatie\CalendarLinks\Link;
+use Tests\Feature\TrainingPanel\BaseTrainingPanelTestCase;
+
+class MyPendingExamsTest extends BaseTrainingPanelTestCase
+{
+    use DatabaseTransactions;
+
+    protected Account $studentAccount;
+
+    protected Member $studentMember;
+
+    protected ExamBooking $examBooking;
+
+    protected ExamSetup $examSetup;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->studentAccount = Account::factory()->create();
+        $this->studentMember = Member::factory()->recycle($this->studentAccount)->create([
+            'cid' => $this->studentAccount->id,
+        ]);
+
+        $this->examBooking = ExamBooking::factory()->create([
+            'taken' => 0,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $this->studentMember->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+            'position_1' => 'EGKK_TWR',
+        ]);
+
+        $this->examSetup = ExamSetup::factory()->create([
+            'bookid' => $this->examBooking->id,
+            'student_id' => $this->studentMember->id,
+            'exam' => 'TWR',
+            'position_1' => 'EGKK_TWR',
+            'setup_date' => now()->subDays(2),
+        ]);
+
+        $this->studentAccount->givePermissionTo('training.access');
+    }
+
+    #[Test]
+    public function it_loads_for_member_with_training_access(): void
+    {
+        Livewire::actingAs($this->studentAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_does_not_load_without_training_access(): void
+    {
+        $noAccessAccount = Account::factory()->create();
+        Member::factory()->recycle($noAccessAccount)->create(['cid' => $noAccessAccount->id]);
+
+        $this->actingAs($noAccessAccount)
+            ->get('/training/my-training/exams')
+            ->assertNotFound();
+    }
+
+    #[Test]
+    public function it_only_shows_pending_exams_belonging_to_the_authenticated_member(): void
+    {
+        $otherAccount = Account::factory()->create();
+        $otherMember = Member::factory()->recycle($otherAccount)->create(['cid' => $otherAccount->id]);
+        $otherBooking = ExamBooking::factory()->create([
+            'taken' => 0,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'APP',
+            'student_id' => $otherMember->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+            'position_1' => 'EGKK_APP',
+        ]);
+        ExamSetup::factory()->create([
+            'bookid' => $otherBooking->id,
+            'student_id' => $otherMember->id,
+            'exam' => 'APP',
+            'setup_date' => now(),
+        ]);
+
+        $component = Livewire::actingAs($this->studentAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertSuccessful();
+
+        $records = $component->instance()->getTable()->getRecords();
+
+        $this->assertCount(1, $records);
+        $this->assertEquals($this->examBooking->id, $records->first()->id);
+    }
+
+    #[Test]
+    public function it_does_not_show_finished_exams(): void
+    {
+        $this->examBooking->update(['finished' => ExamBooking::FINISHED_FLAG]);
+
+        $component = Livewire::actingAs($this->studentAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertSuccessful();
+
+        $this->assertCount(0, $component->instance()->getTable()->getRecords());
+    }
+
+    #[Test]
+    public function it_shows_multiple_pending_exams_when_member_has_several(): void
+    {
+        $secondBooking = ExamBooking::factory()->create([
+            'taken' => 0,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'APP',
+            'student_id' => $this->studentMember->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+            'position_1' => 'EGKK_APP',
+        ]);
+        ExamSetup::factory()->create([
+            'bookid' => $secondBooking->id,
+            'student_id' => $this->studentMember->id,
+            'exam' => 'APP',
+            'setup_date' => now()->subDay(),
+        ]);
+
+        $component = Livewire::actingAs($this->studentAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertSuccessful();
+
+        $this->assertCount(2, $component->instance()->getTable()->getRecords());
+    }
+
+    #[Test]
+    public function it_shows_empty_state_when_member_has_no_pending_exams(): void
+    {
+        $emptyAccount = Account::factory()->create();
+        Member::factory()->recycle($emptyAccount)->create(['cid' => $emptyAccount->id]);
+        $emptyAccount->givePermissionTo('training.access');
+
+        $component = Livewire::actingAs($emptyAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertSuccessful();
+
+        $this->assertCount(0, $component->instance()->getTable()->getRecords());
+    }
+
+    #[Test]
+    public function it_student_can_cancel_accepted_exam_from_pending_exams_table(): void
+    {
+        Notification::fake();
+
+        $examinerAccount = Account::factory()->create();
+        $examinerMember = Member::factory()->forAccount($examinerAccount)->create(['examiner' => true]);
+
+        $this->examBooking->update([
+            'taken' => 1,
+            'taken_date' => now()->addDays(3)->format('Y-m-d'),
+            'taken_from' => '14:00:00',
+            'taken_to' => '16:00:00',
+            'exmr_id' => $examinerMember->id,
+        ]);
+
+        $this->examSetup->update(['booked' => 1]);
+
+        PracticalExaminers::create([
+            'examid' => $this->examBooking->id,
+            'senior' => $examinerMember->id,
+        ]);
+
+        $reason = 'I can no longer make the scheduled time.';
+
+        Livewire::actingAs($this->studentAccount)
+            ->test(MyPendingExamsTable::class)
+            ->assertTableActionVisible('cancelExamRequest', $this->examBooking)
+            ->callTableAction('cancelExamRequest', $this->examBooking, [
+                'reason' => $reason,
+            ])
+            ->assertHasNoTableActionErrors();
+
+        $this->examBooking->refresh();
+        $this->examSetup->refresh();
+
+        $this->assertEquals(0, $this->examBooking->taken);
+        $this->assertNull($this->examBooking->taken_date);
+        $this->assertEquals(0, $this->examSetup->booked);
+        $this->assertDatabaseMissing('practical_examiners', ['examid' => $this->examBooking->id], 'cts');
+        $this->assertDatabaseHas('cancel_reason', [
+            'sesh_id' => $this->examBooking->id,
+            'sesh_type' => 'EX',
+            'reason' => $reason,
+            'reason_by' => $this->studentMember->id,
+        ], 'cts');
+
+        Notification::assertSentTo(
+            $this->studentAccount,
+            ExamCancelledStudentNotification::class,
+            function (ExamCancelledStudentNotification $notification): bool {
+                $mail = $notification->toMail($this->studentAccount);
+                $html = View::make($mail->view, $mail->data())->render();
+
+                return str_contains($html, 'has been successfully cancelled');
+            },
+        );
+        Notification::assertSentTo(
+            $examinerAccount,
+            ExamCancelledExaminerNotification::class,
+            function (ExamCancelledExaminerNotification $notification) use ($reason, $examinerAccount): bool {
+                $mail = $notification->toMail($examinerAccount);
+
+                return $mail->viewData['reason'] === $reason;
+            },
+        );
+    }
+
+    #[Test]
+    public function it_builds_calendar_link_object_with_correct_properties_when_exam_is_scheduled(): void
+    {
+        $this->examBooking->update([
+            'taken' => 1,
+            'taken_date' => '2026-07-15',
+            'taken_from' => '14:00:00',
+            'taken_to' => '16:00:00',
+        ]);
+
+        $method = new \ReflectionMethod(MyPendingExamsTable::class, 'buildCalendarLinkObject');
+        $page = new MyPendingExamsTable;
+        $link = $method->invoke($page, $this->examBooking);
+
+        $this->assertInstanceOf(Link::class, $link);
+        $this->assertSame("Practical Exam - {$this->examBooking->exam}", $link->title);
+        $this->assertSame('2026-07-15 14:00:00', $link->from->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-07-15 16:00:00', $link->to->format('Y-m-d H:i:s'));
+        $this->assertStringContainsString("Exam Type: {$this->examBooking->exam}", $link->description);
+        $this->assertStringContainsString('EGKK_TWR', $link->address);
+    }
+}

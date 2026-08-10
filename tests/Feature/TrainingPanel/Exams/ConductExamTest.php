@@ -1,0 +1,532 @@
+<?php
+
+namespace Tests\Feature\TrainingPanel\Exams;
+
+use App\Enums\ExamResultEnum;
+use App\Events\Training\Exams\PracticalExamCompleted;
+use App\Filament\Training\Pages\Exam\ConductExam;
+use App\Models\Atc\Position;
+use App\Models\Cts\ExamBooking;
+use App\Models\Cts\ExamCriteria;
+use App\Models\Cts\Member;
+use App\Models\Cts\PracticalResult;
+use App\Models\Mship\Account;
+use App\Models\Mship\Qualification;
+use App\Models\Training\TrainingPlace\TrainingPlace;
+use App\Models\Training\TrainingPosition\TrainingPosition;
+use App\Models\Training\WaitingList;
+use Illuminate\Support\Facades\Event;
+use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\Test;
+use Tests\Feature\TrainingPanel\BaseTrainingPanelTestCase;
+
+class ConductExamTest extends BaseTrainingPanelTestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Event::fake();
+    }
+
+    #[Test]
+    public function it_loads_if_authorised()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertSuccessful();
+    }
+
+    #[Test]
+    public function it_does_not_load_if_unauthorised()
+    {
+        $exam = ExamBooking::factory()->create(['taken' => 1, 'finished' => ExamBooking::NOT_FINISHED_FLAG, 'exam' => 'TWR']);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertForbidden();
+    }
+
+    #[Test]
+    public function test_unauthorised_when_exam_doesnt_exist()
+    {
+        $examId = 9999; // Assuming this ID does not exist
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $examId])
+            ->assertForbidden();
+    }
+
+    #[Test]
+    public function test_unauthorised_when_exam_not_taken()
+    {
+        $exam = ExamBooking::factory()->create(['taken' => 0, 'finished' => ExamBooking::NOT_FINISHED_FLAG, 'exam' => 'TWR']);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertForbidden();
+    }
+
+    #[Test]
+    public function test_unauthorised_when_exam_finished()
+    {
+        $exam = ExamBooking::factory()->create(['taken' => 1, 'finished' => ExamBooking::FINISHED_FLAG, 'exam' => 'TWR']);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertForbidden();
+    }
+
+    #[Test]
+    public function test_unauthorised_when_access_to_other_type_of_exam()
+    {
+        $exam = ExamBooking::factory()->create(['taken' => 1, 'finished' => ExamBooking::NOT_FINISHED_FLAG, 'exam' => 'APP']);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertForbidden();
+    }
+
+    #[Test]
+    public function test_can_fill_out_comments_one_of_criteria()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        $examCriteria = ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertSuccessful()
+            ->set("data.form.{$examCriteria->id}.comments", 'Test comment for test criteria')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('practical_criteria_assess', connection: 'cts', data: [
+            'examid' => $exam->id,
+            'criteria_id' => $examCriteria->id,
+            'notes' => '<p>Test comment for test criteria</p>',
+            'result' => ExamResultEnum::Incomplete->value,
+        ]);
+    }
+
+    #[Test]
+    public function test_can_change_grade_on_one_of_criteria()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        $examCriteria = ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertSuccessful()
+            ->set("data.form.{$examCriteria->id}.grade", 'P')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('practical_criteria_assess', connection: 'cts', data: [
+            'examid' => $exam->id,
+            'criteria_id' => $examCriteria->id,
+            'notes' => '',
+            'result' => 'P',
+        ]);
+    }
+
+    #[Test]
+    public function test_full_end_to_end_completion_of_form_pass()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        // create exam criteria in case test database is empty
+        ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->assertSuccessful()
+            ->fillForm(function () use ($exam) {
+                $criteria = ExamCriteria::byType($exam->exam)->get();
+
+                return ['form' => $criteria->mapWithKeys(function ($item) {
+                    return [$item->id => ['comments' => 'Test comment for test criteria', 'grade' => 'P']];
+                })->toArray()];
+            })
+            ->set('examResultData.exam_result', PracticalResult::PASSED)
+            ->set('examResultData.additional_comments', 'Test notes for test result')
+            ->call('completeExam')
+            ->assertHasNoFormErrors(form: 'form')
+            ->assertHasNoFormErrors(form: 'examResultForm');
+
+        $this->assertDatabaseHas('practical_results', data: [
+            'examid' => $exam->id,
+            'student_id' => $student->id,
+            'result' => 'P',
+            'notes' => '<p>Test notes for test result</p>',
+            'date' => now(),
+            'exam' => 'TWR',
+        ], connection: 'cts');
+
+        Event::assertDispatched(PracticalExamCompleted::class, function ($event) use ($exam) {
+            return $event->examBooking->id === $exam->id && $event->practicalResult->examid === $exam->id;
+        });
+    }
+
+    #[Test]
+    public function it_resubmits_student_for_exam_when_exam_report_is_incomplete()
+    {
+        // Create user and login
+        $account = Account::factory()->withQualification()->create();
+        $student = Member::factory()->forAccount($account)->create();
+
+        $position = Position::factory()->create(['callsign' => 'EGKK_TWR']);
+        TrainingPosition::factory()->create(['position_id' => $position->id]);
+
+        // Create exam booking
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'position_1' => $position->callsign,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        // Create exam criteria
+        $criteria = ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        // Submit exam report as incomplete
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->fillForm(function () use ($criteria) {
+                return ['form' => [$criteria->id => ['grade' => 'N']]];
+            })
+            ->set('examResultData.exam_result', ExamResultEnum::Incomplete->value)
+            ->call('completeExam')
+            ->assertHasNoFormErrors();
+
+        // Check the practical_results table
+        $this->assertDatabaseHas('practical_results', connection: 'cts', data: [
+            'examid' => $exam->id,
+            'student_id' => $student->id,
+            'result' => ExamResultEnum::Incomplete->value,
+            'exam' => 'TWR',
+        ]);
+
+        // Check a new exam booking exists for the student & same position
+        $this->assertDatabaseHas('exam_book', connection: 'cts', data: [
+            'student_id' => $student->id,
+            'position_1' => $position->callsign,
+            'exam' => 'TWR',
+        ]);
+
+        // There should now be at least 2 bookings for this student
+        $this->assertEquals(2, ExamBooking::where('student_id', $student->id)
+            ->where('position_1', $position->callsign)
+            ->where('exam', 'TWR')
+            ->count());
+    }
+
+    #[Test]
+    public function it_resubmits_student_for_obs_exam_when_exam_report_is_incomplete()
+    {
+        // Create user with ATC qualification and login
+        $account = Account::factory()->withQualification()->create();
+        $student = Member::factory()->forAccount($account)->create();
+
+        // Create OBS position
+        $position = Position::factory()->create(['callsign' => 'OBS_PH_PT3']);
+        TrainingPosition::factory()->withCtsPositions(['OBS_PH_PT3'])->create(['position_id' => $position->id]);
+
+        // Create exam booking
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'OBS',
+            'student_id' => $student->id,
+            'position_1' => $position->callsign,
+            'student_rating' => Qualification::code('OBS')->first()->vatsim,
+            'rts_id' => 14,
+        ]);
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.obs');
+
+        // Create exam criteria for OBS
+        $criteria = ExamCriteria::create([
+            'exam' => 'OBS',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        // Submit exam report as incomplete
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->fillForm(function () use ($criteria) {
+                return ['form' => [$criteria->id => ['grade' => 'N']]];
+            })
+            ->set('examResultData.exam_result', ExamResultEnum::Incomplete->value)
+            ->call('completeExam')
+            ->assertHasNoFormErrors();
+
+        // Check the practical_results table
+        $this->assertDatabaseHas('practical_results', connection: 'cts', data: [
+            'examid' => $exam->id,
+            'student_id' => $student->id,
+            'result' => ExamResultEnum::Incomplete->value,
+            'exam' => 'OBS',
+        ]);
+
+        // Check a new exam booking exists for the student & OBS position
+        $this->assertDatabaseHas('exam_book', connection: 'cts', data: [
+            'student_id' => $student->id,
+            'position_1' => $position->callsign,
+            'exam' => 'OBS',
+        ]);
+
+        // There should now be at least 2 bookings for this student
+        $this->assertEquals(2, ExamBooking::where('student_id', $student->id)
+            ->where('position_1', $position->callsign)
+            ->where('exam', 'OBS')
+            ->count());
+    }
+
+    #[Test]
+    public function it_removes_training_place_when_exam_is_passed()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+
+        $position = Position::factory()->create(['callsign' => 'EGKK_TWR']);
+        $trainingPosition = TrainingPosition::factory()->create(['position_id' => $position->id]);
+
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'position_1' => $position->callsign,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        $criteria = ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        $waitingList = WaitingList::factory()->create();
+        $waitingListAccount = $waitingList->addToWaitingList($account, $this->privacc);
+
+        $trainingPlace = TrainingPlace::factory()->create([
+            'waiting_list_account_id' => $waitingListAccount->id,
+            'training_position_id' => $trainingPosition->id,
+        ]);
+
+        // Waiting list accounts are deleted when removed from the waiting list, so we need to delete it here to properly test the training place is removed when the exam is passed
+        $waitingListAccount->delete();
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->tap(function ($component) use ($exam) {
+                $allCriteria = ExamCriteria::byType($exam->exam)->get();
+                foreach ($allCriteria as $criterion) {
+                    $component->set("data.form.{$criterion->id}.grade", 'P');
+                    $component->set("data.form.{$criterion->id}.comments", '');
+                }
+            })
+            ->set('examResultData.exam_result', PracticalResult::PASSED)
+            ->set('examResultData.additional_comments', '')
+            ->call('completeExam')
+            ->assertHasNoFormErrors();
+
+        $this->assertSoftDeleted('training_places', [
+            'id' => $trainingPlace->id,
+            'waiting_list_account_id' => $waitingListAccount->id,
+        ]);
+    }
+
+    #[Test]
+    public function it_only_removes_the_training_place_associated_with_the_passed_exam_position()
+    {
+        $account = Account::factory()->create();
+        $student = Member::factory()->forAccount($account)->create();
+
+        $examPosition = Position::factory()->create(['callsign' => 'EGKK_TWR']);
+        $examTrainingPosition = TrainingPosition::factory()->create(['position_id' => $examPosition->id]);
+
+        $examWaitingList = WaitingList::factory()->create();
+        $examWla = $examWaitingList->addToWaitingList($account, $this->privacc);
+        $examTrainingPlace = TrainingPlace::factory()->create([
+            'waiting_list_account_id' => $examWla->id,
+            'training_position_id' => $examTrainingPosition->id,
+        ]);
+        $examWla->delete();
+
+        $otherPosition = Position::factory()->create(['callsign' => 'EGLL_TWR']);
+        $otherTrainingPosition = TrainingPosition::factory()->create(['position_id' => $otherPosition->id]);
+
+        $otherWaitingList = WaitingList::factory()->create();
+        $otherWla = $otherWaitingList->addToWaitingList($account, $this->privacc);
+        $otherTrainingPlace = TrainingPlace::factory()->create([
+            'waiting_list_account_id' => $otherWla->id,
+            'training_position_id' => $otherTrainingPosition->id,
+        ]);
+        $otherWla->delete();
+
+        $exam = ExamBooking::factory()->create([
+            'taken' => 1,
+            'finished' => ExamBooking::NOT_FINISHED_FLAG,
+            'exam' => 'TWR',
+            'student_id' => $student->id,
+            'position_1' => $examPosition->callsign,
+            'student_rating' => Qualification::code('S1')->first()->vatsim,
+        ]);
+
+        $exam->examiners()->create([
+            'examid' => $exam->id,
+            'senior' => $this->panelUser->member->id,
+        ]);
+
+        $this->panelUser->givePermissionTo('training.exams.conduct.twr');
+
+        $criteria = ExamCriteria::create([
+            'exam' => 'TWR',
+            'criteria' => 'Test Criteria',
+            'deleted' => 0,
+        ]);
+
+        Livewire::actingAs($this->panelUser)
+            ->test(ConductExam::class, ['examId' => $exam->id])
+            ->tap(function ($component) use ($exam) {
+                $allCriteria = ExamCriteria::byType($exam->exam)->get();
+                foreach ($allCriteria as $criterion) {
+                    $component->set("data.form.{$criterion->id}.grade", 'P');
+                    $component->set("data.form.{$criterion->id}.comments", '');
+                }
+            })
+            ->set('examResultData.exam_result', PracticalResult::PASSED)
+            ->set('examResultData.additional_comments', '')
+            ->call('completeExam')
+            ->assertHasNoFormErrors();
+
+        $this->assertSoftDeleted('training_places', [
+            'id' => $examTrainingPlace->id,
+        ]);
+
+        $this->assertDatabaseHas('training_places', [
+            'id' => $otherTrainingPlace->id,
+            'deleted_at' => null,
+        ]);
+    }
+}

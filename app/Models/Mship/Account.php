@@ -12,9 +12,10 @@ use App\Models\Mship\Concerns\HasBans;
 use App\Models\Mship\Concerns\HasCTSAccount;
 use App\Models\Mship\Concerns\HasDiscordAccount;
 use App\Models\Mship\Concerns\HasEmails;
+use App\Models\Mship\Concerns\HasEmailSettings;
 use App\Models\Mship\Concerns\HasEndorsement;
-use App\Models\Mship\Concerns\HasForumAccount;
 use App\Models\Mship\Concerns\HasHelpdeskAccount;
+use App\Models\Mship\Concerns\HasMentoringPermissions;
 use App\Models\Mship\Concerns\HasMoodleAccount;
 use App\Models\Mship\Concerns\HasNetworkData;
 use App\Models\Mship\Concerns\HasNotifications;
@@ -23,10 +24,14 @@ use App\Models\Mship\Concerns\HasQualifications;
 use App\Models\Mship\Concerns\HasRoles;
 use App\Models\Mship\Concerns\HasStates;
 use App\Models\Mship\Concerns\HasTeamSpeakRegistrations;
+use App\Models\Mship\Concerns\HasTwoFactor;
 use App\Models\Mship\Concerns\HasVisitTransferApplications;
 use App\Models\Mship\Concerns\HasWaitingLists;
 use App\Models\Mship\Note\Type;
 use App\Models\Roster;
+use App\Models\RosterHistory;
+use App\Models\Training\WaitingList\WaitingListAccount;
+use App\Models\Training\WaitingList\WaitingListRetentionCheck;
 use Illuminate\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Access\Authorizable as AuthorizableContract;
 use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
@@ -34,10 +39,13 @@ use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes as SoftDeletingTrait;
 use Illuminate\Foundation\Auth\Access\Authorizable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Passport\HasApiTokens;
 use Spatie\Permission\Models\Role;
 use Watson\Rememberable\Rememberable;
@@ -56,7 +64,7 @@ use Watson\Rememberable\Rememberable;
  * @property \Illuminate\Support\Carbon|null $last_login
  * @property string $last_login_ip
  * @property string|null $remember_token
- * @property int|null $discord_id
+ * @property string|null $discord_id
  * @property string|null $discord_access_token
  * @property string|null $discord_refresh_token
  * @property string|null $vatsim_access_token
@@ -66,7 +74,6 @@ use Watson\Rememberable\Rememberable;
  * @property string|null $experience
  * @property int $age
  * @property bool $inactive
- * @property int $is_invisible
  * @property int $debug
  * @property \Illuminate\Support\Carbon|null $joined_at
  * @property \Illuminate\Support\Carbon|null $created_at
@@ -75,17 +82,17 @@ use Watson\Rememberable\Rememberable;
  * @property \Illuminate\Support\Carbon|null $deleted_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Sys\Activity> $activityRecent
  * @property-read int|null $activity_recent_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Account\Ban> $bans
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Account\Ban> $bans
  * @property-read int|null $bans_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Account\Ban> $bansAsInstigator
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Account\Ban> $bansAsInstigator
  * @property-read int|null $bans_as_instigator_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \Laravel\Passport\Client> $clients
  * @property-read int|null $clients_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Sys\Data\Change> $dataChanges
  * @property-read int|null $data_changes_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Account\Endorsement> $endorsements
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Account\Endorsement> $endorsements
  * @property-read int|null $endorsements_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Feedback\Feedback> $feedback
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Feedback\Feedback> $feedback
  * @property-read int|null $feedback_count
  * @property-read mixed $active_qualifications
  * @property-read mixed $discord_name
@@ -101,6 +108,7 @@ use Watson\Rememberable\Rememberable;
  * @property-read bool $is_on_network
  * @property-read mixed $is_system_banned
  * @property-read bool $mandatory_password
+ * @property-read bool $mandatory_two_factor
  * @property-read mixed|string $name_preferred
  * @property-read mixed $network_ban
  * @property-read mixed $new_ts_registration
@@ -128,7 +136,6 @@ use Watson\Rememberable\Rememberable;
  * @property-read mixed $unread_notifications
  * @property-read \Illuminate\Support\Collection $verified_secondary_emails
  * @property-read mixed $visit_transfer_current
- * @property-read mixed $visit_transfer_referee_pending
  * @property-read mixed $has_controller_rating
  * @property-read mixed $name
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\NetworkData\Atc> $networkDataAtc
@@ -148,21 +155,21 @@ use Watson\Rememberable\Rememberable;
  * @property-read int|null $o_auth_tokens_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Permission> $permissions
  * @property-read int|null $permissions_count
- * @property-read \App\Models\Training\WaitingList\WaitingListAccount $pivot
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Qualification> $qualifications
+ * @property-read WaitingListAccount $pivot
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Qualification> $qualifications
  * @property-read int|null $qualifications_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Sys\Notification> $readSystemNotifications
  * @property-read int|null $read_system_notifications_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, Role> $roles
  * @property-read int|null $roles_count
  * @property-read Roster|null $roster
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\Account\Email> $secondaryEmails
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, Account\Email> $secondaryEmails
  * @property-read int|null $secondary_emails_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Sso\Email> $ssoEmails
  * @property-read int|null $sso_emails_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\State> $states
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, State> $states
  * @property-read int|null $states_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Mship\State> $statesHistory
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, State> $statesHistory
  * @property-read int|null $states_history_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\TeamSpeak\Registration> $teamspeakRegistrations
  * @property-read int|null $teamspeak_registrations_count
@@ -170,8 +177,6 @@ use Watson\Rememberable\Rememberable;
  * @property-read int|null $tokens_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\VisitTransfer\Application> $visitTransferApplications
  * @property-read int|null $visit_transfer_applications_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\VisitTransfer\Reference> $visitTransferReferee
- * @property-read int|null $visit_transfer_referee_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Training\WaitingList> $waitingLists
  * @property-read int|null $waiting_lists_count
  *
@@ -227,10 +232,11 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
         HasCTSAccount,
         HasDiscordAccount,
         HasEmails,
+        HasEmailSettings,
         HasEndorsement,
         HasFactory,
-        HasForumAccount,
         HasHelpdeskAccount,
+        HasMentoringPermissions,
         HasMoodleAccount,
         HasNetworkData,
         HasNotifications,
@@ -239,11 +245,13 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
         HasRoles,
         HasStates,
         HasTeamSpeakRegistrations,
+        HasTwoFactor,
         HasVisitTransferApplications,
         HasWaitingLists,
         Notifiable,
         Rememberable,
-        SoftDeletingTrait;
+        SoftDeletingTrait,
+        TwoFactorAuthenticatable;
     use HasApiTokens {
         clients as oAuthClients;
         tokens as oAuthTokens;
@@ -283,7 +291,7 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
 
     protected $casts = [
         'inactive' => 'boolean',
-        'discord_id' => 'int',
+        'discord_id' => 'string',
         'last_login' => 'datetime',
         'joined_at' => 'datetime',
         'cert_checked_at' => 'datetime',
@@ -292,11 +300,14 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
         'deleted_at' => 'datetime',
         'password_set_at' => 'datetime',
         'password_expires_at' => 'datetime',
+        'two_factor_confirmed_at' => 'datetime',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
         'discord_access_token',
         'discord_refresh_token',
         'vatsim_access_token',
@@ -357,19 +368,19 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
 
     public function bansAsInstigator()
     {
-        return $this->hasMany(\App\Models\Mship\Account\Ban::class, 'banned_by')
+        return $this->hasMany(Account\Ban::class, 'banned_by')
             ->orderBy('created_at', 'DESC');
     }
 
     public function notes()
     {
-        return $this->hasMany(\App\Models\Mship\Account\Note::class, 'account_id')
+        return $this->hasMany(AccountNoteData::class, 'account_id')
             ->orderBy('created_at', 'DESC');
     }
 
     public function noteWriter()
     {
-        return $this->hasMany(\App\Models\Mship\Account\Note::class, 'writer_id');
+        return $this->hasMany(AccountNoteData::class, 'writer_id');
     }
 
     public function tokens()
@@ -384,7 +395,7 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
 
     public function feedback()
     {
-        return $this->hasMany(\App\Models\Mship\Feedback\Feedback::class);
+        return $this->hasMany(Feedback\Feedback::class);
     }
 
     public function addNote($noteType, $noteContent, $writer = null, $attachment = null)
@@ -419,6 +430,11 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
     public function roster(): HasOne
     {
         return $this->hasOne(Roster::class, 'account_id', 'id');
+    }
+
+    public function rosterHistory(): HasMany
+    {
+        return $this->hasMany(RosterHistory::class, 'account_id');
     }
 
     public function onRoster(): bool
@@ -622,5 +638,20 @@ class Account extends Model implements AuthenticatableContract, AuthorizableCont
         }
 
         return [$this->id];
+    }
+
+    /**
+     * All retention checks for this account across all waiting lists.
+     */
+    public function retentionChecks(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            WaitingListRetentionCheck::class,
+            WaitingListAccount::class,
+            'account_id',
+            'waiting_list_account_id',
+            'id',
+            'id'
+        )->withoutGlobalScopes(); // Include waiting list accounts that have been soft deleted
     }
 }

@@ -5,16 +5,25 @@ namespace App\Models\Training;
 use App\Events\Training\AccountAddedToWaitingList;
 use App\Events\Training\FlagAddedToWaitingList;
 use App\Events\Training\WaitingListCreated;
+use App\Models\Atc\Position;
+use App\Models\Atc\PositionGroup;
 use App\Models\Mship\Account;
 use App\Models\Mship\Note\Type;
+use App\Models\Mship\Qualification;
+use App\Models\Training\TrainingPosition\TrainingPosition;
 use App\Models\Training\WaitingList\Removal;
 use App\Models\Training\WaitingList\WaitingListAccount;
 use App\Models\Training\WaitingList\WaitingListFlag;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Number;
 
 /**
  * @property int $id
@@ -27,17 +36,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property \Illuminate\Support\Carbon|null $deleted_at
  * @property string|null $cts_theory_exam_level
  * @property array|null $feature_toggles
- * @property-read \Illuminate\Database\Eloquent\Collection<int, Account> $accounts
+ * @property-read Collection<int, Account> $accounts
  * @property-read int|null $accounts_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, WaitingListFlag> $flags
+ * @property-read Collection<int, WaitingListFlag> $flags
  * @property-read int|null $flags_count
  * @property-read object $feature_toggles_formatted
+ * @property-read bool $is_vt
  * @property-read mixed $formatted_department
  * @property-read bool $should_check_atc_hours
  * @property-read bool $should_check_cts_theory_exam
- * @property-read \Illuminate\Database\Eloquent\Collection<int, Account> $staff
+ * @property-read Collection<int, Account> $staff
  * @property-read int|null $staff_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, WaitingListAccount> $waitingListAccounts
+ * @property-read Collection<int, WaitingListAccount> $waitingListAccounts
  * @property-read int|null $waiting_list_accounts_count
  *
  * @method static \Illuminate\Database\Eloquent\Builder|WaitingList newModelQuery()
@@ -89,7 +99,7 @@ class WaitingList extends Model
 
     public $table = 'training_waiting_list';
 
-    protected $fillable = ['name', 'slug', 'department', 'feature_toggles', 'requires_roster_membership', 'self_enrolment_enabled', 'self_enrolment_minimum_qualification_id', 'self_enrolment_maximum_qualification_id', 'self_enrolment_hours_at_qualification_id', 'self_enrolment_hours_at_qualification_minimum_hours', 'max_capacity'];
+    protected $fillable = ['name', 'slug', 'department', 'home_members_only', 'feature_toggles', 'requires_roster_membership', 'self_enrolment_enabled', 'self_enrolment_minimum_qualification_id', 'self_enrolment_maximum_qualification_id', 'self_enrolment_hours_at_qualification_id', 'self_enrolment_hours_at_qualification_minimum_hours', 'max_capacity', 'retention_checks_enabled', 'retention_checks_months', 'required_endorsement_id'];
 
     const ATC_DEPARTMENT = 'atc';
 
@@ -110,12 +120,15 @@ class WaitingList extends Model
         'self_enrolment_hours_at_qualification_id' => 'integer',
         'self_enrolment_hours_at_qualification_minimum_hours' => 'integer',
         'max_capacity' => 'integer',
+        'retention_checks_enabled' => 'boolean',
+        'retention_checks_months' => 'integer',
+        'required_endorsement_id' => 'integer',
     ];
 
     /**
      * A Waiting List can be managed by many Staff Members (Accounts).
      *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     * @return BelongsToMany
      */
     public function staff()
     {
@@ -143,11 +156,51 @@ class WaitingList extends Model
     /**
      * One WaitingList can have many flags associated with it.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     * @return HasMany
      */
     public function flags()
     {
         return $this->hasMany(WaitingListFlag::class, 'list_id');
+    }
+
+    /**
+     * A WaitingList can be related to many TrainingPositions.
+     */
+    public function trainingPositions(): MorphToMany
+    {
+        return $this->morphedByMany(
+            TrainingPosition::class,
+            'trainable',
+            'trainable_waiting_list',
+            'waiting_list_id',
+            'trainable_id'
+        )->withTimestamps();
+    }
+
+    /**
+     * A WaitingList can be related to many Qualifications (pilot training).
+     */
+    public function qualifications(): MorphToMany
+    {
+        return $this->morphedByMany(
+            Qualification::class,
+            'trainable',
+            'trainable_waiting_list',
+            'waiting_list_id',
+            'trainable_id'
+        )->withTimestamps();
+    }
+
+    /**
+     * All trainables (training positions and qualifications) linked to this list.
+     *
+     * @return Attribute<Collection, never>
+     */
+    protected function trainables(): Attribute
+    {
+        return Attribute::make(
+            get: fn (): Collection => $this->trainingPositions->concat($this->qualifications)
+        );
     }
 
     /**
@@ -196,6 +249,10 @@ class WaitingList extends Model
         // Check if the waiting list is at capacity
         if ($this->isAtCapacity()) {
             throw new \InvalidArgumentException("Cannot add account to waiting list '{$this->name}' as it has reached its maximum capacity of {$this->max_capacity} users.");
+        }
+
+        if (! $this->accountHasRequiredEndorsement($account)) {
+            throw new \InvalidArgumentException("Cannot add account to waiting list '{$this->name}' as they do not have the endorsement: {$this->requiredEndorsement->name}.");
         }
 
         $timestamp = $createdAt != null ? $createdAt : Carbon::now();
@@ -250,10 +307,12 @@ class WaitingList extends Model
         $waitingListAccount->removal_comment = $removal->otherReason;
         $waitingListAccount->removed_by = $removal->removedBy;
 
+        $position = Number::ordinal($this->positionOf($waitingListAccount));
+
         $noteType = Type::isShortCode('training')->firstOrFail();
         $account->addNote(
             $noteType,
-            "Removed from {$this->name} Waiting List: {$removal->comment()}",
+            "Removed from list '{$this->name}' ({$removal->comment()}), original join date {$waitingListAccount->created_at->format('Y-m-d')}, was {$position}.",
             $removal->removedBy);
 
         $waitingListAccount->save();
@@ -268,6 +327,11 @@ class WaitingList extends Model
     public function isPilotList()
     {
         return $this->department == self::PILOT_DEPARTMENT;
+    }
+
+    public function getIsVtAttribute(): bool
+    {
+        return $this->feature_toggles['is_vt'] ?? false;
     }
 
     public function getFormattedDepartmentAttribute()
@@ -294,22 +358,23 @@ class WaitingList extends Model
         return (object) [
             'check_atc_hours' => $this->getShouldCheckAtcHoursAttribute(),
             'check_cts_theory_exam' => $this->getShouldCheckCtsTheoryExamAttribute(),
+            'is_vt' => $this->is_vt,
         ];
     }
 
     public function minimumQualification()
     {
-        return $this->belongsTo(\App\Models\Mship\Qualification::class, 'self_enrolment_minimum_qualification_id');
+        return $this->belongsTo(Qualification::class, 'self_enrolment_minimum_qualification_id');
     }
 
     public function maximumQualification()
     {
-        return $this->belongsTo(\App\Models\Mship\Qualification::class, 'self_enrolment_maximum_qualification_id');
+        return $this->belongsTo(Qualification::class, 'self_enrolment_maximum_qualification_id');
     }
 
     public function hoursAtQualification()
     {
-        return $this->belongsTo(\App\Models\Mship\Qualification::class, 'self_enrolment_hours_at_qualification_id');
+        return $this->belongsTo(Qualification::class, 'self_enrolment_hours_at_qualification_id');
     }
 
     public function hasCapacityLimit(): bool
@@ -345,8 +410,31 @@ class WaitingList extends Model
         return max(0, $this->max_capacity - $this->getCurrentCapacity());
     }
 
+    /**
+     * Scope a query to only include waiting lists with retention checks enabled.
+     */
+    public function scopeWithRetentionChecksEnabled($query)
+    {
+        return $query->where('retention_checks_enabled', true);
+    }
+
     public function __toString()
     {
         return (string) $this->name;
+    }
+
+    public function requiredEndorsement()
+    {
+        return $this->belongsTo(PositionGroup::class, 'required_endorsement_id');
+    }
+
+    public function accountHasRequiredEndorsement(Account $account): bool
+    {
+        if (! $this->required_endorsement_id) {
+            return true; // If no endorsement is required, return true
+        }
+
+        return $account->endorsements()->active()->whereHasMorph('endorsable', PositionGroup::class, fn ($query) => $query->where('id', $this->required_endorsement_id))
+            ->exists();
     }
 }

@@ -10,6 +10,7 @@ use App\Repositories\Cts\MentorRepository;
 use App\Repositories\Cts\StudentRepository;
 use App\Repositories\Cts\ValidationPositionRepository;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Spatie\Permission\Models\Role;
 
 class SyncCtsRoles extends Command
@@ -28,6 +29,10 @@ class SyncCtsRoles extends Command
      */
     protected $description = 'Allocate the relevant roles on Core depending on CTS permissions.';
 
+    private int $assignedCount = 0;
+
+    private int $removedCount = 0;
+
     /**
      * Execute the console command.
      *
@@ -41,15 +46,14 @@ class SyncCtsRoles extends Command
         $this->syncMentorsByRts(18, 33); // Tower
         $this->syncMentorsByRts(19, 47); // Approach
         $this->syncMentorsByCallsign('OBS', 32); // OBS Mentors
-        $this->syncMentorsByCallsign('EGKK_GND', 53); // Gatwick Mentors
         $this->syncMentorsByCallsign('TFP', 65); // PTD Flying Programme Mentors
         $this->syncMentorsByCallsign('P1_PPL(A)', Role::findByName('P1 Mentor')->id); // P1 Mentors
         $this->syncMentorsByCallsign('P2_SEIR(A)', Role::findByName('P2 Mentor')->id); // P2 Mentors
+        $this->syncMentorsByCallsign('P3_CMEL(A)', Role::findByName('P3 Mentor')->id); // P3 Mentors
 
         // Sync Students
         $this->syncPilotStudents(55); // Pilot Students
         $this->syncStudentsByPosition('TFP_FLIGHT', Role::findByName('TFP Student')->id); // TFP Students
-        $this->syncStudentsByPosition('EGKK_GND', Role::findByName('Gatwick GND Students')->id); // Gatwick Ground Students
 
         /**
          * If you wish to do multiple positions for the same rule, don't do what I did and separate them into different
@@ -64,9 +68,12 @@ class SyncCtsRoles extends Command
         $this->syncStudentsByRts(19, Role::findByName('ATC Students (APP)')->id); // APP Students
         $this->syncStudentsByRts(17, Role::findByName('ATC Students (ENR)')->id); // Enroute Students
 
-        // Sync Examiners
-        $this->syncAtcExaminers(31); // ATC
         $this->syncPilotExaminers(40); // Pilot
+
+        Log::info('sync:cts-roles completed', [
+            'assigned' => $this->assignedCount,
+            'removed' => $this->removedCount,
+        ]);
     }
 
     private function syncMentorsByRts(int $rtsId, int $roleId): void
@@ -80,13 +87,6 @@ class SyncCtsRoles extends Command
     {
         $hasRole = $this->getAccountsWithRoleId($roleId);
         $shouldHaveRole = (new MentorRepository)->getMentorsFor($search);
-        $this->syncRoles($hasRole, $shouldHaveRole, $roleId);
-    }
-
-    private function syncAtcExaminers(int $roleId): void
-    {
-        $hasRole = $this->getAccountsWithRoleId($roleId);
-        $shouldHaveRole = (new ExaminerRepository)->getAtcExaminers();
         $this->syncRoles($hasRole, $shouldHaveRole, $roleId);
     }
 
@@ -149,10 +149,12 @@ class SyncCtsRoles extends Command
 
         foreach ($assignRole as $account) {
             Account::find($account)->assignRole($roleId);
+            $this->assignedCount++;
         }
 
         foreach ($removeRole as $account) {
             Account::find($account)->removeRole($roleId);
+            $this->removedCount++;
         }
     }
 

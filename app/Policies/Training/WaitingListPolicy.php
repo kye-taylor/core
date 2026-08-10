@@ -43,6 +43,21 @@ class WaitingListPolicy
         return $this->checkHasPermissionForList($account, $waitingList, ['waiting-lists.remove-accounts.%s']);
     }
 
+    public function offerTrainingPlace(Account $account, WaitingList $waitingList)
+    {
+        return $this->checkHasPermissionForList($account, $waitingList, ['waiting-lists.training-place.offer.%s']);
+    }
+
+    public function viewTrainingPlaceOffer(Account $account, WaitingList $waitingList)
+    {
+        return $this->checkHasPermissionForList($account, $waitingList, ['waiting-lists.training-place.view-offer.%s']);
+    }
+
+    public function rescindTrainingPlaceOffer(Account $account, WaitingList $waitingList)
+    {
+        return $this->checkHasPermissionForList($account, $waitingList, ['waiting-lists.training-place.rescind-offer.%s']);
+    }
+
     public function addFlags(Account $account, WaitingList $waitingList)
     {
         return $this->checkHasPermissionForList($account, $waitingList, ['waiting-lists.add-flags.%s']);
@@ -66,6 +81,12 @@ class WaitingListPolicy
     public function selfEnrol(Account $account, WaitingList $waitingList)
     {
         return WaitingListSelfEnrolment::canAccountEnrolOnList($account, $waitingList);
+    }
+
+    public function trainingPlacesManualSetup(Account $account, WaitingList $waitingList)
+    {
+        return $this->checkHasPermissionForList($account, $waitingList, 'training-places.manual-setup.%s')
+            || $account->hasPermissionTo('training-places.manual-setup');
     }
 
     /**

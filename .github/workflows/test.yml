@@ -3,11 +3,12 @@ name: Tests
 on:
   push:
     branches:
-      - '*'
-      - '**'
-    tags-ignore:
-      - v*
+      - main
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -15,18 +16,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: 8.4
+          coverage: none
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Node Cache
+        id: node-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            node_modules
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-
+
+      - name: Install assets
+        if: steps.node-cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Composer Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            vendor
+            ~/.composer/cache
+          key: composer-${{ matrix.php }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            composer-${{ matrix.php }}-
+            composer-
 
       - name: Install PHP dependencies
-        uses: ramsey/composer-install@v3
+        uses: ramsey/composer-install@v4
 
-      - name: 'Lint PHP'
-        run: composer lint -- --test
+      - name: Run Prek
+        uses: j178/prek-action@v2
 
   test:
     name: PHP ${{ matrix.php }} / Composer ${{ matrix.composer }}
@@ -39,45 +72,45 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.4']
-        composer: ['v2']
+        php: ["8.4"]
+        composer: ["v2"]
         experimental: [false]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
 
       - name: Configure PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           tools: composer:${{ matrix.composer }}
+          coverage: none
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: "24"
 
       - name: Composer Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          path: vendor
-          key: composer-${{ hashFiles('**/composer.lock') }}
+          path: |
+            vendor
+            ~/.composer/cache
+          key: composer-${{ matrix.php }}-${{ hashFiles('**/composer.lock') }}
           restore-keys: |
-            composer-${{ hashFiles('**/composer.lock') }}
+            composer-${{ matrix.php }}-
             composer-
 
       - name: Node Cache
-        uses: actions/cache@v4
+        id: node-cache
+        uses: actions/cache@v6
         with:
-          path: |
-            node_modules
-            public/build
-            public/css
-            public/js
-            public/mix-manifest.json
+          path: node_modules
           key: npm-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            npm-${{ hashFiles('**/package-lock.json') }}
             npm-
 
       - name: Create Databases
@@ -85,7 +118,6 @@ jobs:
           sudo systemctl start mysql.service
           mysql -e 'CREATE DATABASE IF NOT EXISTS core;' -h127.0.0.1 -uroot -proot
           mysql -e 'CREATE DATABASE IF NOT EXISTS core_testing;' -h127.0.0.1 -uroot -proot
-          mysql -e 'CREATE DATABASE IF NOT EXISTS cts;' -h127.0.0.1 -uroot -proot
 
       - name: Composer Authentication
         run: composer config -g github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
@@ -94,6 +126,7 @@ jobs:
         run: composer install --no-interaction
 
       - name: Install assets
+        if: steps.node-cache.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Compile assets
@@ -105,29 +138,33 @@ jobs:
       - name: Publish Telescope
         run: php artisan telescope:publish
 
-      - name: Migrate & Seed Database
-        run: php artisan migrate && php artisan cts:migrate:fresh
-
-      - name: Cache Routes
-        run: php artisan route:cache
-
-      - name: Cache Config
-        run: php artisan config:cache
+      - name: Cache Application
+        run: |
+          php artisan route:cache
+          php artisan config:cache
 
       - name: Serve Application
         run: php artisan serve -q &
 
-      - name: Execute PHPUnit Tests
-        run: vendor/bin/phpunit
+      - name: Execute Tests
+        run: php artisan test --parallel --processes=4 --recreate-databases --log-junit=junit.xml
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: junit.xml
 
   trigger-deploy:
     name: Trigger Deploy
-    needs: test
+    needs: [lint, test]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger deploy workflow
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.PAT }}
           event-type: deploy-trigger

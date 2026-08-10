@@ -1,4 +1,5 @@
 /node_modules
+.npm-cache-local
 /public/hot
 /public/storage
 /public/vendor/horizon
@@ -23,3 +24,10 @@ _ide_helper.php
 /build
 
 .gitmodules
+
+.vscode/mcp.json
+.playwright-mcp
+public/sitemap.xml
+docs/superpowers
+
+.github/scripts/__pycache__/

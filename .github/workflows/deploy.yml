@@ -13,7 +13,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout Codes
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.client_payload.ref }}
@@ -63,16 +63,16 @@ jobs:
       - name: Configure PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php }}
-          tools: composer:${{ matrix.composer }}
+          php-version: '8.4'
+          tools: composer:v2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Composer Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor
           key: composer-${{ hashFiles('**/composer.lock') }}
@@ -81,25 +81,25 @@ jobs:
             composer-
 
       - name: Node Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          path: |
-            node_modules
-            public/build
-            public/css
-            public/js
-            public/mix-manifest.json
+          path: node_modules
           key: npm-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             npm-${{ hashFiles('**/package-lock.json') }}
             npm-
 
-      - name: Remove node_modules
-        run: rm -rf node_modules
+      - name: Install composer dependencies (for asset build)
+        run: composer install --no-interaction --no-progress --no-dev
 
-      - name: Remove vendor for NPM build.
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build assets
+        run: npm run build
+
+      - name: Remove vendor directory post npm build
         run: rm -rf vendor
-
 
       - name: Deploy Application
         uses: appleboy/scp-action@master
@@ -150,10 +150,65 @@ jobs:
             ln -sfn $RELEASE_DIRECTORY $APPLICATION_ROOT/current
           envs: RELEASE_DIRECTORY,SHARED_DIRECTORY,APPLICATION_ROOT
 
-      - name: Trigger Forge Deployment
-        uses: jbrooksuk/laravel-forge-action@v1.0.4
+      - name: (Remote) Run deployment commands
+        uses: appleboy/ssh-action@master
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
         with:
-          trigger_url: ${{ secrets.FORGE_DEPLOY_WEBHOOK }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER}}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # Ensure we're working from the new release
+            cd /home/core/www.vatsim.uk/current
+
+            # Stop Application / Services
+            $PHP_PATH artisan down
+            $PHP_PATH artisan horizon:terminate
+
+            # Cache & Config
+            $PHP_PATH artisan migrate --step --force -n
+            $PHP_PATH artisan db:seed --class=RolesAndPermissionsSeeder --force
+            $PHP_PATH artisan route:cache
+            $PHP_PATH artisan config:cache
+            $PHP_PATH artisan view:clear
+            $PHP_PATH artisan storage:link
+
+            # Publish
+            $PHP_PATH artisan telescope:publish
+            $PHP_PATH artisan horizon:publish
+            $PHP_PATH artisan filament:assets
+            $PHP_PATH artisan log-viewer:publish
+
+            # Run migrations
+            $PHP_PATH artisan migrate --force
+
+            # Move log files
+            if [ -e "storage/logs/laravel.log" ]; then
+              mv storage/logs/laravel.log storage/logs/laravel.log.`date +%s`; true
+            fi
+
+            # Restart PHP-FPM
+
+            ( flock -w 10 9 || exit 1
+                echo 'Restarting FPM...'; sudo -S service $PHP_FPM reload ) 9>/tmp/fpmlock
+
+            # Bugsnag
+            $PHP_PATH artisan bugsnag:deploy --repository "https://github.com/VATSIM-UK/core" --revision "$COMMIT" --builder "$GITHUB_ACTOR"
+
+            # Clear stale job overlap locks from Redis
+            # $PHP_PATH artisan tinker --execute="foreach(Cache::connection()->keys('*laravel-queue-overlap:*') as \$k) { Cache::connection()->del(\$k); }"
+
+            # Generate sitemap
+            $PHP_PATH artisan sitemap:generate
+
+            # Restart Discord bot
+            sudo systemctl restart core-discord-honeypot
+
+            # Start Applications / Services
+            $PHP_PATH artisan up
+          envs: APPLICATION_ROOT,PHP_PATH,TAG,COMMIT,GITHUB_ACTOR
 
       - name: Create Sentry release
         uses: getsentry/action-release@v3
@@ -173,20 +228,29 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            # Ensure we're only keeping the desired number of versions in history
+            set -euo pipefail
 
-            # Releases are extracted by an array ordered by directory
-            # creation date.
-            releases=($(ls -tU $APPLICATION_ROOT/releases))
+            # Keep the newest N release directories; never delete the live current release.
+            # Deploy SSH user must own $APPLICATION_ROOT/releases (chown if rm fails).
+            releases_dir="$APPLICATION_ROOT/releases"
+            current_release="$(readlink -f "$APPLICATION_ROOT/current")"
+            mapfile -t releases < <(ls -1dt "$releases_dir"/*/ 2>/dev/null || true)
             number_of_releases=${#releases[@]}
 
-            if [ "$number_of_releases" -gt "$VERSIONS_TO_KEEP " ]; then
-              for i in $(seq 0 `expr $number_of_releases - $VERSIONS_TO_KEEP - 1`);
-              do
-                echo "Removing: ${releases[$i]}"
-                # rm -rf $APPLICATION_ROOT/releases/${releases[$i]}
-              done
+            if [ "$number_of_releases" -le "$VERSIONS_TO_KEEP" ]; then
+              echo "Nothing to prune ($number_of_releases <= $VERSIONS_TO_KEEP)"
+              exit 0
             fi
+
+            for ((i=VERSIONS_TO_KEEP; i<number_of_releases; i++)); do
+              candidate="${releases[$i]%/}"
+              if [ "$(readlink -f "$candidate")" = "$current_release" ]; then
+                echo "Skipping live release: $candidate"
+                continue
+              fi
+              echo "Removing: $candidate"
+              rm -rf "$candidate"
+            done
           envs: APPLICATION_ROOT,VERSIONS_TO_KEEP
 
       - name: Update Deployment Status (Failed)

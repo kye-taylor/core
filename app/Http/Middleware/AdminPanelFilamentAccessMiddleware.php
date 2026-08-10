@@ -3,7 +3,10 @@
 namespace App\Http\Middleware;
 
 use Closure;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
 
 class AdminPanelFilamentAccessMiddleware
@@ -11,8 +14,8 @@ class AdminPanelFilamentAccessMiddleware
     /**
      * Handle an incoming request.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Illuminate\Http\Response|\Illuminate\Http\RedirectResponse)  $next
-     * @return \Illuminate\Http\Response|\Illuminate\Http\RedirectResponse
+     * @param  Closure(Request): (Response|RedirectResponse)  $next
+     * @return Response|RedirectResponse
      */
     public function handle(Request $request, Closure $next)
     {
@@ -26,6 +29,8 @@ class AdminPanelFilamentAccessMiddleware
         }
 
         if (! $account->can('admin.access')) {
+            Log::warning('Access denied: admin panel access', ['account_id' => $account->id, 'path' => $request->path(), 'ip' => $request->ip()]);
+
             return abort(404);
         }
 

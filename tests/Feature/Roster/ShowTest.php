@@ -17,7 +17,7 @@ class ShowTest extends TestCase
     {
         $account = Account::factory()->create();
         $qualification = Qualification::code('S2')->first();
-        $account->addState(\App\Models\Mship\State::findByCode('DIVISION'));
+        $account->addState(State::findByCode('DIVISION'));
         $account->addQualification($qualification);
 
         Roster::create([
@@ -27,9 +27,7 @@ class ShowTest extends TestCase
         Livewire::test(Show::class, ['account' => $account])
             ->set('searchTerm', 'ZZZ')
             ->call('search')
-            ->assertSessionHas('filament.notifications', function ($value) {
-                return $value[0]['title'] == 'Position cannot be found.' && $value[0]['status'] == 'danger';
-            })
+            ->assertNotified('Position cannot be found.')
             // ensure the position is cleared from any previous searches
             ->assertSet('positions', null)
             ->assertSet('searchTerm', null);
@@ -112,9 +110,7 @@ class ShowTest extends TestCase
             ->assertDontSee("{$account->id} can control {$uncontrollablePosition->callsign}")
             ->set('searchTerm', 'EGKK_DEP')
             ->call('search')
-            ->assertSessionHas('filament.notifications', function ($value) {
-                return $value[0]['title'] == 'Position cannot be found.' && $value[0]['status'] == 'danger';
-            })
+            ->assertNotified('Position cannot be found.')
             ->assertDontSee("{$account->id} can control {$uncontrollablePosition->callsign}")
             ->assertSet('position', null)
             ->assertSet('searchTerm', null);

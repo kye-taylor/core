@@ -1,6 +1,7 @@
 <?php
 
 // Dashboard
+
 Route::get('/dashboard')->uses('Mship\Management@getLanding')->name('landing');
 
 // Authentication
@@ -8,7 +9,13 @@ Route::get('login')->uses('Auth\LoginController@login')->name('login');
 Route::post('login')->uses('Auth\LoginController@login')->name('login.post');
 Route::get('login-secondary')->uses('Auth\LoginController@showLoginForm')->middleware('auth:vatsim-sso')->name('auth-secondary');
 Route::post('login-secondary')->uses('Auth\SecondaryLoginController@loginSecondary')->middleware('auth:vatsim-sso')->name('auth-secondary.post');
+Route::get('login/password/setup')->uses('Auth\LoginPasswordSetupController@show')->middleware('auth:vatsim-sso')->name('login.password.setup');
+Route::post('login/password/setup')->uses('Auth\LoginPasswordSetupController@store')->middleware('auth:vatsim-sso')->name('login.password.setup.store');
 Route::post('logout')->uses('Auth\LogoutController')->name('logout');
+
+require base_path('routes/fortify-two-factor.php');
+
+Route::get('/staff')->uses('Site\StaffPageController@staff')->middleware('auth_full_group')->name('site.staff');
 
 Route::view('banned-network', 'errors.banned-network')->name('banned.network');
 Route::get('banned-local')->uses('Auth\LocalBanDisplayController')->name('banned.local');
@@ -53,6 +60,7 @@ Route::group([
         'prefix' => 'manage',
     ], function () {
         Route::get('dashboard')->uses('Management@getDashboard')->name('dashboard');
+        Route::get('dashboard/beta')->uses('Management@getDashboardBeta')->name('dashboard.beta');
         Route::get('cert/update')->uses('Management@requestCertCheck')->name('cert.update');
         Route::get('email/verify/{code}')->uses('Management@getVerifyEmail')->name('email.verify');
         Route::get('email/add')->uses('Management@getEmailAdd')->name('email.add');
@@ -82,17 +90,29 @@ Route::group([
     ], function () {
         Route::get('')->uses('WaitingLists@index')->name('index');
         Route::post('self-enrol/{waitingList}')->uses('WaitingLists@selfEnrol')->name('self-enrol');
+        Route::post('self-remove/{waitingList}')->uses('WaitingLists@selfRemove')->name('self-remove');
+
+        // Training place offers
+        Route::get('training-place-offer/{token}/accept')
+            ->uses('\App\Http\Controllers\Mship\Training\TrainingPlaceOfferController@accept')
+            ->name('training-place-offer.accept');
+
+        Route::get('training-place-offer/{token}/decline')
+            ->uses('\App\Http\Controllers\Mship\Training\TrainingPlaceOfferController@decline')
+            ->name('training-place-offer.decline');
     });
 
     // Other
     Route::group([
     ], function () {
-        Route::post('auth/invisibility')->uses('Management@postInvisibility')->name('auth.invisibility');
 
         Route::get('notification/list')->uses('Notification@getList')->name('notification.list');
         Route::post('notification/acknowledge/{sysNotification}')->uses('Notification@postAcknowledge')->name('notification.acknowledge');
     });
 });
+
+// Waiting Lists - Retention (No authentication required)
+Route::get('mship/waiting-lists/retention')->uses('Mship\WaitingLists@getRetentionWithToken')->name('mship.waiting-lists.retention.token');
 
 Route::get('atcfb', function () {
     return redirect()
@@ -146,9 +166,7 @@ Route::group([
     'namespace' => 'Atc',
     'middleware' => 'auth_full_group',
 ], function () {
-    Route::get('endorsements/gatwick')->uses('EndorsementController@getGatwickGroundIndex')->name('endorsements.gatwick_ground');
     Route::get('endorsements/heathrow-s1')->uses('EndorsementController@getHeathrowGroundS1Index')->name('endorsements.heathrow_ground_s1');
-    Route::get('hour-check/area')->uses('EndorsementController@getAreaIndex')->name('hour_check.area');
 });
 
 // Network data
@@ -189,23 +207,11 @@ Route::group([
             Route::post('facility/manual')->uses('Application@postManualFacility')->name('facility.manual.post');
             Route::get('statement')->uses('Application@getStatement')->name('statement');
             Route::post('statement')->uses('Application@postStatement')->name('statement.post');
-            Route::get('referees')->uses('Application@getReferees')->name('referees');
-            Route::post('referees')->uses('Application@postReferees')->name('referees.post');
-            Route::post('referees/{reference}/delete')->uses('Application@postRefereeDelete')->name('referees.delete.post');
             Route::get('submit')->uses('Application@getSubmit')->name('submit');
             Route::post('submit')->uses('Application@postSubmit')->name('submit.post');
             Route::get('withdraw')->uses('Application@getWithdraw')->name('withdraw');
             Route::post('withdraw')->uses('Application@postWithdraw')->name('withdraw.post');
         });
     });
-
-    // References
-    Route::group([
-        'as' => 'reference.',
-        'prefix' => 'reference',
-    ], function () {
-        Route::get('complete/{token}')->uses('Reference@getComplete')->name('complete');
-        Route::post('complete/{token}')->uses('Reference@postComplete')->name('complete.post');
-        Route::post('complete/{token}/cancel')->uses('Reference@postCancel')->name('complete.cancel');
-    });
 });
+Route::redirect('/vt', '/visit-transfer');

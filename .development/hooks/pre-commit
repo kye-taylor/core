@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# pre-commit hook for Laravel Pint
+# Auto-fix files, but fail commit if anything was fixed.
+
+if [ -f "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+# Cross-platform PHP
+PHP_BIN="php"
+if command -v php.bat &>/dev/null 2>&1; then
+    PHP_BIN="php.bat"
+fi
+
+# Cross-platform pint bin
+PINT_BIN="vendor/bin/pint"
+if [ ! -f "$PINT_BIN" ] && [ ! -f "${PINT_BIN}.bat" ]; then
+    PINT_BIN="vendor/laravel/pint/builds/pint"
+fi
+
+php_files=$(git diff --cached --name-only --diff-filter=ACM | { grep '\.php$' || true; })
+
+if [ -n "$php_files" ]; then
+    # Staged files — check only these
+    echo "$php_files" | xargs "$PHP_BIN" "$PINT_BIN" --quiet --parallel || true
+    fixed_files=$(echo "$php_files" | xargs git diff --name-only --)
+else
+    # No staged files — let pint scan everything natively
+    dirty_before=$(git diff --name-only || true)
+    "$PHP_BIN" "$PINT_BIN" --quiet --parallel || true
+    dirty_after=$(git diff --name-only || true)
+
+    fixed_files=$(comm -13 <(echo "$dirty_before" | sort -u) <(echo "$dirty_after" | sort -u) || true)
+fi
+
+if [ -n "$fixed_files" ]; then
+    echo
+    echo "⚠️  Pint fixed some files. Please re-add them and commit again:"
+    echo "$fixed_files"
+    exit 1
+fi
+
+exit 0

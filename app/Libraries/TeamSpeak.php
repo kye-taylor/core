@@ -12,6 +12,8 @@ use App\Models\TeamSpeak\ServerGroup;
 use Cache;
 use Carbon\Carbon;
 use DB;
+use Exception;
+use Illuminate\Support\Facades\Log;
 use PlanetTeamSpeak\TeamSpeak3Framework\Exception\ServerQueryException;
 use PlanetTeamSpeak\TeamSpeak3Framework\Exception\TeamSpeak3Exception;
 use PlanetTeamSpeak\TeamSpeak3Framework\Node\Client;
@@ -114,6 +116,8 @@ class TeamSpeak
             $customInfo = $client->customInfo();
         } catch (TeamSpeak3Exception $e) {
             if ($e->getCode() !== self::DATABASE_EMPTY_RESULT_SET) {
+                Log::error('Failed to retrieve TeamSpeak client custom info', ['exception' => $e]);
+
                 throw $e;
             } else {
                 return;
@@ -203,12 +207,26 @@ class TeamSpeak
         if ($member->is_network_banned) {
             $duration = 60 * 60 * 12; // 12 hours
             self::banClient($client, trans('teamspeak.ban.network.ban'), $duration);
+            Log::info('TeamSpeak client banned: network ban', [
+                'client_db_id' => $client['client_database_id'],
+                'account_id' => $member->id,
+                'duration' => $duration,
+            ]);
         } elseif ($member->is_system_banned) {
             self::kickClient($client, trans('teamspeak.ban.system.ban'));
             sleep(2);
             $duration = $member->system_ban->period_left;
             self::banClient($client, trans('teamspeak.ban.system.ban'), $duration);
+            Log::info('TeamSpeak client kicked and banned: system ban', [
+                'client_db_id' => $client['client_database_id'],
+                'account_id' => $member->id,
+                'duration' => $duration,
+            ]);
         } elseif ($member->is_inactive) {
+            Log::info('TeamSpeak client deactivated: member inactive', [
+                'client_db_id' => $client['client_database_id'],
+                'account_id' => $member->id,
+            ]);
             self::deactivateClient($client, trans('teamspeak.inactive'));
         }
     }
@@ -217,7 +235,7 @@ class TeamSpeak
      * Check a member has accepted any necessary notifications.
      *
      *
-     * @throws \App\Exceptions\TeamSpeak\ClientKickedFromServerException
+     * @throws ClientKickedFromServerException
      */
     public static function checkMemberMandatoryNotifications(Client $client, Account $member)
     {
@@ -237,6 +255,10 @@ class TeamSpeak
             } else {
                 self::pokeClient($client, trans('teamspeak.notification.mandatory.poke'));
                 self::kickClient($client, trans('teamspeak.notification.mandatory.kick'));
+                Log::info('TeamSpeak client kicked: mandatory notification not acknowledged', [
+                    'client_db_id' => $client['client_database_id'],
+                    'account_id' => $member->id,
+                ]);
                 throw new ClientKickedFromServerException;
             }
         } elseif ($member->has_unread_important_notifications) {
@@ -249,7 +271,7 @@ class TeamSpeak
      * Check the client's nickname is correct.
      *
      *
-     * @throws \App\Exceptions\TeamSpeak\ClientKickedFromServerException
+     * @throws ClientKickedFromServerException
      */
     public static function checkClientNickname(Client $client, Account $member)
     {
@@ -282,6 +304,10 @@ class TeamSpeak
             self::pokeClient($client, trans('teamspeak.nickname.invalid.poke1'));
             self::pokeClient($client, trans('teamspeak.nickname.invalid.poke2'));
             self::kickClient($client, trans('teamspeak.nickname.invalid.kick'));
+            Log::info('TeamSpeak client kicked: invalid nickname', [
+                'client_db_id' => $client['client_database_id'],
+                'account_id' => $member->id,
+            ]);
             Cache::forget(self::CACHE_NICKNAME_PARTIALLY_CORRECT.$client['client_database_id']);
             Cache::forget(self::CACHE_NICKNAME_PARTIALLY_CORRECT_GRACE.$client['client_database_id']);
             throw new ClientKickedFromServerException;
@@ -301,18 +327,50 @@ class TeamSpeak
         $memberQualifications = $member->active_qualifications;
 
         foreach ($serverGroups as $group) {
-            $memberHasRequiredQualification = $group->qualification ? $memberQualifications->contains('id', $group->qualification->id) : false;
-            $memberHasGroupPermission = $group->permission ? $member->hasPermissionTo($group->permission) : false;
+            try {
+                $memberHasRequiredQualification = $group->qualification ? $memberQualifications->contains('id', $group->qualification->id) : false;
+                $memberHasGroupPermission = $group->permission ? $member->hasPermissionTo($group->permission) : false;
 
-            $qualifiesForGroup = $memberHasRequiredQualification || $memberHasGroupPermission;
-            $alreadyInGroup = in_array($group->dbid, $currentGroups);
+                $qualifiesForGroup = $memberHasRequiredQualification || $memberHasGroupPermission;
+                $alreadyInGroup = in_array($group->dbid, $currentGroups);
 
-            if ($qualifiesForGroup && ! $alreadyInGroup) {
-                \Log::info("servergroupaddclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
-                $client->request("servergroupaddclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
-            } elseif (! $group->default && $alreadyInGroup && ! $qualifiesForGroup) {
-                \Log::info("servergroupdelclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
-                $client->request("servergroupdelclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
+                Log::debug('Account group qualification evaluated', [
+                    'account_id' => $member->id,
+                    'group_name' => $group->name,
+                    'qualifies_for_group' => $qualifiesForGroup,
+                    'already_in_group' => $alreadyInGroup,
+                ]);
+
+                if ($qualifiesForGroup && ! $alreadyInGroup) {
+                    Log::info('servergroupaddclient', [
+                        'sgid' => $group->dbid,
+                        'cldbid' => $client['client_database_id'],
+                    ]);
+                    $client->request("servergroupaddclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
+                } elseif (! $group->default && $alreadyInGroup && ! $qualifiesForGroup) {
+                    Log::info('servergroupdelclient', [
+                        'sgid' => $group->dbid,
+                        'cldbid' => $client['client_database_id'],
+                    ]);
+                    $client->request("servergroupdelclient sgid={$group->dbid} cldbid={$client['client_database_id']}");
+                }
+            } catch (ServerQueryException $e) {
+                Log::warning('TeamSpeak server group update failed for client', [
+                    'sgid' => $group->dbid,
+                    'group_name' => $group->name ?? null,
+                    'cldbid' => $client['client_database_id'],
+                    'code' => $e->getCode(),
+                    'message' => $e->getMessage(),
+                ]);
+            } catch (Exception $e) {
+                Log::warning('TeamSpeak server group evaluation or update failed for client', [
+                    'sgid' => $group->dbid,
+                    'group_name' => $group->name ?? null,
+                    'cldbid' => $client['client_database_id'],
+                    'exception' => get_class($e),
+                    'message' => $e->getMessage(),
+                ]);
+                report($e);
             }
         }
     }
@@ -341,6 +399,8 @@ class TeamSpeak
                 if ($e->getCode() == self::DATABASE_EMPTY_RESULT_SET) {
                     $currentGroup = $defaultGroup->dbid;
                 } else {
+                    Log::error('Failed to retrieve TeamSpeak client channel group', ['exception' => $e]);
+
                     throw $e;
                 }
             }
@@ -357,7 +417,7 @@ class TeamSpeak
      * Check the client's (allowed) idle time.
      *
      *
-     * @throws \App\Exceptions\TeamSpeak\ClientKickedFromServerException
+     * @throws ClientKickedFromServerException
      */
     public static function checkClientIdleTime(Client $client, Account $member)
     {
@@ -460,14 +520,20 @@ class TeamSpeak
      *
      * @param  string  $reason
      *
-     * @throws \App\Exceptions\TeamSpeak\ClientKickedFromServerException
+     * @throws ClientKickedFromServerException
      */
     public static function deactivateClient(Client $client, $reason)
     {
         self::pokeClient($client, $reason);
         self::kickClient($client, $reason);
         $client->deleteDb();
-        self::getActiveRegistration($client)->delete($client->getParent());
+        $registration = self::getActiveRegistration($client);
+        $registration->delete($client->getParent());
+        Log::info('TeamSpeak client deactivated: removed from server and registration deleted', [
+            'client_db_id' => $client['client_database_id'],
+            'account_id' => $registration->account_id,
+            'reason' => $reason,
+        ]);
         throw new ClientKickedFromServerException;
     }
 }

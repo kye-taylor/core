@@ -11,6 +11,7 @@ use App\Models\Training\WaitingList\WaitingListAccount;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class UpdateRoster extends Command
 {
@@ -60,12 +61,24 @@ class UpdateRoster extends Command
         );
 
         // Automatically mark those on the Gander Oceanic roster as eligible
+        try {
+            $ganderResponse = Http::withUserAgent('VATSIM-UK')->get(config('services.gander-oceanic.api.base').'/roster');
+        } catch (\Exception $e) {
+            Log::error('Gander roster fetch failed', ['exception' => $e]);
+            $ganderResponse = null;
+        }
+
+        if ($ganderResponse && $ganderResponse->failed()) {
+            Log::error('Gander roster fetch failed', ['status' => $ganderResponse->status()]);
+            $ganderResponse = null;
+        }
+
         $eligible->push(
-            $ganderControllers = Http::get(config('services.gander-oceanic.api.base').'/roster')
-                ->collect()
+            $ganderControllers = $ganderResponse
+                ?->collect()
                 ->where('active', true)
                 ->pluck('cid')
-                ->flatten()
+                ->flatten() ?? collect()
         );
 
         $eligible = $eligible->flatten()->unique();
@@ -79,7 +92,7 @@ class UpdateRoster extends Command
                 $query
                     ->join('roster', 'mship_account_state.account_id', '=', 'roster.account_id')
                     ->whereIn('mship_state.code', ['DIVISION'])
-                    ->orWhereColumn('roster.updated_at', '>', 'mship_account_state.start_at');
+                    ->orWhereColumn('roster.updated_at', '>=', 'mship_account_state.start_at');
             });
         });
 
@@ -88,22 +101,34 @@ class UpdateRoster extends Command
                 $query
                     ->join('roster', 'mship_account_state.account_id', '=', 'roster.account_id')
                     ->whereIn('mship_state.code', ['TRANSFERRING', 'VISITING'])
-                    ->orWhereColumn('roster.updated_at', '>', 'mship_account_state.start_at');
+                    ->orWhereColumn('roster.updated_at', '>=', 'mship_account_state.start_at');
             });
         });
+
+        $removeFromRosterCount = $removeFromRoster->count();
+        $homeRemovalsCount = $homeRemovals->count();
+        $visitingAndTransferringRemovalsCount = $visitingAndTransferringRemovals->count();
 
         $removeFromRoster->get()
             ->each
             ->remove($rosterUpdate);
 
         // On an ATC waiting list, not on the roster, need to be removed...
-        $removeFromWaitingList = WaitingListAccount::with('waitingList')
+        $removeFromWaitingList = WaitingListAccount::with('waitingList', 'account')
             ->whereIn('list_id', WaitingList::where('department', WaitingList::ATC_DEPARTMENT)->where('requires_roster_membership', true)->get('id'))
             ->whereNotIn('account_id', $eligible)
             ->get();
+
+        $removal = new WaitingList\Removal(WaitingList\RemovalReason::Inactivity, null, 'Triggered by roster removal');
+
         $removeFromWaitingList
-            ->each
-            ->delete();
+            ->each(function (WaitingListAccount $waitingListAccount) use ($removal) {
+                $waitingListAccount->waitingList->removeFromWaitingList($waitingListAccount->account, $removal);
+                Log::debug('Removed account from waiting list due to roster removal', [
+                    'account_id' => $waitingListAccount->account->id,
+                    'waiting_list_id' => $waitingListAccount->waitingList->id,
+                ]);
+            });
 
         // Not on the roster, need to be on...
         Roster::upsert(
@@ -117,11 +142,22 @@ class UpdateRoster extends Command
                 'newS1Members' => $newS1Members->count(),
                 'ganderControllers' => $ganderControllers->count(),
                 'eligible' => $eligible->count(),
-                'removeFromRoster' => $removeFromRoster->count(),
-                'homeRemovals' => $homeRemovals->count(),
-                'visitingAndTransferringRemovals' => $visitingAndTransferringRemovals->count(),
+                'removeFromRoster' => $removeFromRosterCount,
+                'homeRemovals' => $homeRemovalsCount,
+                'visitingAndTransferringRemovals' => $visitingAndTransferringRemovalsCount,
                 'removeFromWaitingList' => $removeFromWaitingList->countBy('list_id'),
             ],
+        ]);
+
+        Log::info('roster:update completed', [
+            'meetHourRequirement' => $meetHourRequirement->count(),
+            'newS1Members' => $newS1Members->count(),
+            'ganderControllers' => $ganderControllers->count(),
+            'eligible' => $eligible->count(),
+            'removeFromRoster' => $removeFromRosterCount,
+            'homeRemovals' => $homeRemovalsCount,
+            'visitingAndTransferringRemovals' => $visitingAndTransferringRemovalsCount,
+            'removeFromWaitingList' => $removeFromWaitingList->count(),
         ]);
 
         $this->comment('✅ Roster updated!');

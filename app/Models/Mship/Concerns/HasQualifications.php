@@ -65,9 +65,13 @@ trait HasQualifications
     public function removeQualification(Qualification $qualification)
     {
         if ($this->hasQualification($qualification)) {
-            Log::info("Removing qualification {$qualification->code} from member {$this->id}");
+            Log::info('Removing qualification from member', ['qualification_code' => $qualification->code, 'account_id' => $this->id]);
 
-            $memberQualificationPivot = $this->qualifications_pilot->where('code', $qualification->code)->first()->pivot;
+            $memberQualificationPivot = $this->qualifications->where('id', $qualification->id)->first()?->pivot;
+
+            if (! $memberQualificationPivot) {
+                return $this;
+            }
 
             $memberQualificationPivot->deleted_at = now();
             $memberQualificationPivot->save();
@@ -85,7 +89,7 @@ trait HasQualifications
      * @param  int|null  $atcRating  The VATSIM ATC rating
      * @param  int|null  $pilotRating  The VATSIM pilot rating
      */
-    public function updateVatsimRatings(?int $atcRating, ?int $pilotRating)
+    public function updateVatsimRatings(?int $atcRating = null, ?int $pilotRating = null)
     {
         if ($atcRating === 0) {
             $this->addNetworkBan('Network ban discovered via Cert login.');
@@ -127,6 +131,7 @@ trait HasQualifications
 
         return $this->qualifications_atc_training
             ->merge($this->qualifications_pilot_training)
+            ->merge($this->qualifications_pilot_virtual)
             ->merge($this->qualifications_admin)
             ->push($this->qualification_atc)
             ->push($this->qualification_pilot)
@@ -192,6 +197,13 @@ trait HasQualifications
     {
         return $this->qualifications->filter(function ($qual) {
             return $qual->type == QualificationTypeEnum::PilotTraining->value;
+        });
+    }
+
+    public function getQualificationsPilotVirtualAttribute()
+    {
+        return $this->qualifications->filter(function ($qual) {
+            return $qual->type == QualificationTypeEnum::PilotVirtual->value;
         });
     }
 

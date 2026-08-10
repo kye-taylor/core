@@ -1,16 +1,21 @@
-import preset from './vendor/filament/support/tailwind.config.preset';
+import colors from 'tailwindcss/colors';
 
-const defaultTheme = require('tailwindcss/defaultTheme');
-const colors = require('tailwindcss/colors');
+// Shared brand colours referenced by multiple tokens below.
+const uknavy = '#17375e';
 
-module.exports = {
-    presets: [preset],
+export default {
     darkMode: 'class',
-    mode: 'jit',
     theme: {
         colors: {
+            // Nav (VATSIM UK branding)
+            'nav-bg': uknavy,
+            'nav-accent': '#00b0f0',
+            'nav-secondary': '#0f131a',
+            'nav-hover-bg': '#f5f5f5',
+            'nav-hover-text': '#262626',
             // Core
             brand: '#25ADE3',
+            uknavy: uknavy,
             transparent: 'transparent',
             black: colors.black,
             white: colors.white,
@@ -46,16 +51,6 @@ module.exports = {
             fuchsia: colors.fuchsia,
             pink: colors.pink,
             rose: colors.rose,
-        }
-    }, content: {
-        files: [
-            './app/**/*.php',
-            './resources/*.php',
-            './resources/**/*.php',
-            "./resources/**/*.blade.php",
-            './vendor/filament/**/*.blade.php',
-            './storage/framework/views/*.php'
-        ]
+        },
     },
-    plugins: [require("@tailwindcss/forms")],
 };

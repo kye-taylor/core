@@ -1,18 +1,22 @@
 import {defineConfig} from 'vite';
-import laravel, {refreshPaths} from 'laravel-vite-plugin'
+import laravel, {refreshPaths} from 'laravel-vite-plugin';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
     plugins: [
+        tailwindcss(),
         laravel({
             input: [
-                'resources/assets/less/admin.less',
                 'resources/assets/sass/app.scss',
-                'resources/assets/css/tailwind.css',
-                'resources/assets/js/app.js',
                 'resources/assets/sass/home.scss',
+                'resources/assets/css/tailwind.css',
+                'resources/assets/css/mship-dashboard.css',
+                'resources/assets/css/bookings-calendar.css',
+                'resources/assets/js/bookings-calendar.js',
+                'resources/assets/js/app.js',
                 'resources/assets/js/home.js',
                 'resources/assets/js/snow.js',
-                'resources/assets/js/top-notification.js'
+                'resources/assets/js/top-notification.js',
             ],
             refresh: [
                 ...refreshPaths,

@@ -1,0 +1,324 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Filament\Training\Pages\Mentor;
+
+use App\Filament\Support\NameColumn;
+use App\Filament\Training\Pages\Mentor\Concerns\RemembersTrainingGroupCategory;
+use App\Filament\Training\Pages\Mentor\Widgets\ManageMentorsStatsWidget;
+use App\Filament\Training\Support\TrainingMemberAccountSearch;
+use App\Models\Mship\Account;
+use App\Models\Training\Mentoring\ManageMentorsScope;
+use App\Models\Training\TrainingPosition\TrainingPosition;
+use App\Services\Training\MentorPermissionService;
+use Carbon\Carbon;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
+use Filament\Actions\BulkAction;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Select;
+use Filament\Notifications\Notification;
+use Filament\Pages\Page;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Livewire\Attributes\Url;
+
+class ManageMentors extends Page implements HasTable
+{
+    use InteractsWithTable;
+    use RemembersTrainingGroupCategory;
+
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-user-group';
+
+    protected string $view = 'filament.training.pages.manage-mentors';
+
+    protected static ?int $navigationSort = 45;
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Mentoring';
+
+    protected static ?string $title = 'Manage Mentors';
+
+    protected static ?string $slug = 'mentoring/mentors';
+
+    #[Url]
+    public string $category = '';
+
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->can('viewAny', ManageMentorsScope::class) ?? false;
+    }
+
+    public function mount(): void
+    {
+        $this->rememberCategory();
+
+        if (empty($this->category) || ! $this->canViewCategory($this->category)) {
+            $this->category = $this->firstVisibleCategory() ?? '';
+        }
+
+        $this->saveCategoryToSession();
+    }
+
+    protected function getHeaderWidgets(): array
+    {
+        return [
+            ManageMentorsStatsWidget::make([
+                'category' => $this->category,
+            ]),
+        ];
+    }
+
+    protected function getHeaderActions(): array
+    {
+        $allCategories = collect(MentorPermissionService::atcCategories())
+            ->merge(MentorPermissionService::pilotCategories());
+
+        return [
+            ActionGroup::make(
+                $allCategories
+                    ->filter(fn (string $cat) => $this->canViewCategory($cat))
+                    ->map(fn (string $cat) => Action::make('cat_'.str($cat)->slug('_'))
+                        ->label($cat)
+                        ->url(static::getUrl(['category' => $cat]))
+                        ->icon($this->category === $cat ? 'heroicon-m-check' : null)
+                    )
+                    ->all())
+                ->label("Training Group: {$this->category}")
+                ->icon('heroicon-m-chevron-down')
+                ->color('gray')
+                ->button(),
+        ];
+    }
+
+    public function table(Table $table): Table
+    {
+        $canManage = $this->canManageCategory($this->category);
+
+        return $table
+            ->query($this->mentorsQuery($this->category))
+            ->columns([
+                TextColumn::make('id')->label('CID')->searchable(),
+                NameColumn::make('name'),
+                TextColumn::make('mentoring_permissions')
+                    ->label(fn () => $this->category.' Permissions')
+                    ->state(fn (Account $record) => $this->resolvePermissionsArray($record, $this->category))
+                    ->badge()
+                    ->color('gray')
+                    ->separator(',')
+                    ->limitList(7)
+                    ->wrap(),
+                TextColumn::make('last_mentored')
+                    ->label('Last Mentored')
+                    ->state(fn (Account $record) => app(MentorPermissionService::class)->getLastMentoredDate($record, $this->category)?->format('d/m/Y') ?? 'Never')
+                    ->description(fn (string $state) => $state !== 'Never' ? Carbon::createFromFormat('d/m/Y', $state)->diffForHumans() : null)
+                    ->sortable(query: function (Builder $query, string $direction): Builder {
+                        $ids = $query->get()->sortBy(
+                            fn (Account $account) => app(MentorPermissionService::class)->getLastMentoredDate($account, $this->category)?->timestamp ?? 0,
+                            SORT_REGULAR,
+                            $direction === 'desc'
+                        )->pluck('id');
+
+                        return $query->orderByRaw('FIELD(id, '.$ids->implode(',').')');
+                    }),
+            ])->filters([
+                SelectFilter::make('position')
+                    ->label('Positions')
+                    ->options(fn () => $this->positionOptions($this->category))
+                    ->query(function (Builder $query, array $data) {
+                        if (empty($data['values'])) {
+                            return $query;
+                        }
+
+                        return $query->whereHas('mentorTrainingPositions', function (Builder $q) use ($data) {
+                            $q->whereIn('mentorable_id', $data['values']);
+                        });
+                    })
+                    ->multiple()
+                    ->searchable(),
+            ])
+            ->bulkActions([
+                BulkAction::make('bulkRemove')
+                    ->label('Remove Selected')
+                    ->icon('heroicon-o-x-mark')
+                    ->color('danger')
+                    ->visible(fn () => $canManage && ! empty($this->category))
+                    ->modalHeading(fn () => 'Remove Selected Mentors from '.$this->category)
+                    ->modalSubheading('This will revoke all mentoring permissions for the selected members within this specific training group.')
+                    ->action(function (Collection $records) {
+                        foreach ($records as $record) {
+                            app(MentorPermissionService::class)->revokeFromCategory(
+                                $record,
+                                $this->category
+                            );
+                        }
+
+                        Notification::make()
+                            ->title('Mentor Access Revoked')
+                            ->body("All permissions for the selected mentors in {$this->category} have been removed.")
+                            ->success()
+                            ->send();
+                    }),
+            ])
+            ->headerActions([
+                Action::make('addMentor')
+                    ->label('Add Mentor')
+                    ->icon('heroicon-o-plus')
+                    ->modalHeading(fn () => 'Add Mentor to '.$this->category)
+                    ->modalSubmitActionLabel('Add Mentor')
+                    ->visible(fn () => $canManage && ! empty($this->category))
+                    ->form([
+                        Select::make('account_ids')
+                            ->label('Member(s)')
+                            ->multiple()
+                            ->searchable()
+                            ->getSearchResultsUsing(function (string $search) {
+                                return TrainingMemberAccountSearch::searchAccountsForSelect($search, 50);
+                            })
+                            ->getOptionLabelsUsing(fn (array $values) => Account::whereIn('id', $values)->get()->mapWithKeys(fn (Account $a) => [$a->id => $a->name.' ('.$a->id.')'])->toArray())
+                            ->options([])
+                            ->required(),
+                        CheckboxList::make('position_ids')
+                            ->label(fn () => $this->category.' Mentoring Permissions')
+                            ->options(fn () => $this->positionOptions($this->category))
+                            ->bulkToggleable()
+                            ->columns(2)
+                            ->required(),
+                    ])
+                    ->action(function (array $data): void {
+                        $accounts = Account::findMany($data['account_ids']);
+                        $modelClass = app(MentorPermissionService::class)->getModelClassForCategory($this->category);
+                        $items = $modelClass::findMany($data['position_ids']);
+                        foreach ($accounts as $account) {
+                            foreach ($items as $item) {
+                                app(MentorPermissionService::class)->assignToMentorable($account, $item, auth()->user(), $this->category);
+                            }
+                        }
+
+                        Notification::make()->title('Mentor(\'s) added')->success()->send();
+                    }),
+            ])
+            ->recordActions([
+                Action::make('managePositions')
+                    ->label('Manage Permissions')
+                    ->icon('heroicon-o-pencil-square')
+                    ->visible(fn () => $canManage)
+                    ->modalSubmitActionLabel('Update Permissions')
+                    ->form(fn (Account $record) => [
+                        CheckboxList::make('position_ids')
+                            ->label(fn () => $this->category.' Mentoring Permissions')
+                            ->options(fn () => $this->positionOptions($this->category))
+                            ->bulkToggleable()
+                            ->columns(2)
+                            ->required()
+                            ->default($this->currentPositionIds($record, $this->category)),
+                    ])
+                    ->action(function (array $data, Account $record): void {
+                        app(MentorPermissionService::class)->syncPositionsInCategory(
+                            $record,
+                            $this->category,
+                            collect($data['position_ids'] ?? []),
+                            auth()->user(),
+                        );
+
+                        Notification::make()->title('Permissions updated')->success()->send();
+                    }),
+
+                Action::make('removeAll')
+                    ->label('Remove')
+                    ->icon('heroicon-o-x-mark')
+                    ->color('danger')
+                    ->modalHeading(fn () => 'Remove Mentor from '.$this->category)
+                    ->modalSubheading('This will revoke all mentoring permissions for this member within this specific training group.')
+                    ->modalButton('Remove Mentor')
+                    ->modalIcon('heroicon-o-trash')
+                    ->requiresConfirmation()
+                    ->visible(fn () => $canManage)
+                    ->action(function (Account $record): void {
+                        app(MentorPermissionService::class)->revokeFromCategory(
+                            $record,
+                            $this->category
+                        );
+
+                        Notification::make()
+                            ->title('Mentor Access Revoked')
+                            ->body("All permissions for {$record->name} in {$this->category} have been removed.")
+                            ->success()
+                            ->send();
+                    }),
+            ]);
+    }
+
+    private function canViewCategory(string $category): bool
+    {
+        return auth()->user()->can('viewCategory', [new ManageMentorsScope, $category]);
+    }
+
+    private function canManageCategory(string $category): bool
+    {
+        return auth()->user()->can('manageCategory', [new ManageMentorsScope, $category]);
+    }
+
+    private function firstVisibleCategory(): ?string
+    {
+        return collect(MentorPermissionService::atcCategories())
+            ->merge(MentorPermissionService::pilotCategories())
+            ->first(fn (string $cat) => $this->canViewCategory($cat));
+    }
+
+    private function mentorsQuery(string $category): Builder
+    {
+        return app(MentorPermissionService::class)
+            ->accountsWithMentoringInCategoryQuery($category)
+            ->with(['mentorTrainingPositions.mentorable']);
+    }
+
+    private function positionOptions(string $category): array
+    {
+        $modelClass = app(MentorPermissionService::class)->getModelClassForCategory($category);
+
+        if ($modelClass === TrainingPosition::class) {
+            $items = $modelClass::where('category', $category)->get();
+        } else {
+            $code = MentorPermissionService::PILOT_CATEGORY_QUALIFICATION_MAP[$category] ?? null;
+            $items = $modelClass::where('code', $code)->get();
+        }
+
+        return $items->mapWithKeys(function ($item) {
+            $label = ($item instanceof TrainingPosition) ? ($item->name ?? $item->position?->callsign ?? "Position {$item->id}") : "({$item->code}) ".($item->name_long ?? $item->name);
+
+            return [(string) $item->id => $label];
+        })->toArray();
+    }
+
+    private function currentPositionIds(Account $account, string $category): array
+    {
+        return $account->mentorTrainingPositions
+            ->filter(fn ($mtp) => $mtp->mentorable && app(MentorPermissionService::class)->mentorableBelongsToCategory($mtp->mentorable, $category))
+            ->pluck('mentorable_id')
+            ->map(fn ($id) => (string) $id)
+            ->toArray();
+    }
+
+    private function resolvePermissionsArray(Account $record, string $category): array
+    {
+        return $record->mentorTrainingPositions
+            ->filter(fn ($mtp) => $mtp->mentorable && app(MentorPermissionService::class)->mentorableBelongsToCategory($mtp->mentorable, $category))
+            ->map(function ($mtp) {
+                if ($mtp->mentorable instanceof TrainingPosition) {
+                    return $mtp->mentorable->name ?? $mtp->mentorable->position?->callsign ?? "Position {$mtp->mentorable_id}";
+                }
+
+                return $mtp->mentorable->code ?? $mtp->mentorable->name;
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
+    }
+}

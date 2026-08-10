@@ -2,14 +2,22 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Training\Pages\Dashboard;
+use App\Filament\Training\Pages\EmailSettings;
+use App\Filament\Training\Pages\Endorsements;
+use App\Filament\Widgets\AccountInfoWidget;
+use App\Filament\Widgets\UpcomingTrainingSessionWidget;
+use App\Http\Middleware\MandatoryTwoFactor;
+use App\Http\Middleware\TrackInactivity;
 use App\Http\Middleware\TrainingPanelAccessMiddleware;
+use Filament\Actions\Action;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
-use Filament\Pages;
+use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
-use Filament\Widgets;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -27,16 +35,17 @@ class TrainingPanelProvider extends PanelProvider
             ->colors([
                 'primary' => '#25ADE3',
             ])
-            ->login()
             ->discoverResources(in: app_path('Filament/Training/Resources'), for: 'App\\Filament\\Training\\Resources')
             ->discoverPages(in: app_path('Filament/Training/Pages'), for: 'App\\Filament\\Training\\Pages')
             ->pages([
-                Pages\Dashboard::class,
+                Dashboard::class,
+                EmailSettings::class,
+                Endorsements::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Training/Widgets'), for: 'App\\Filament\\Training\\Widgets')
             ->widgets([
-                Widgets\AccountWidget::class,
-                Widgets\FilamentInfoWidget::class,
+                AccountInfoWidget::class,
+                UpcomingTrainingSessionWidget::class,
             ])
             ->middleware([
                 EncryptCookies::class,
@@ -46,11 +55,43 @@ class TrainingPanelProvider extends PanelProvider
                 ShareErrorsFromSession::class,
                 VerifyCsrfToken::class,
                 SubstituteBindings::class,
+                TrackInactivity::class,
+                MandatoryTwoFactor::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
             ])
             ->authMiddleware([
                 TrainingPanelAccessMiddleware::class,
-            ]);
+            ])
+            ->brandLogo(asset('images/branding/vatsimuk_blackblue.png'))
+            ->darkModeBrandLogo(asset('images/branding/vatsimuk_whiteblue.png'))
+            ->brandName('VATSIM UK')
+            ->navigationGroups([
+                'My Training',
+                'Exams',
+                'Mentoring',
+                'Endorsements',
+                'Statistics',
+                'Training',
+                'Theory',
+            ])
+            ->navigationItems([
+                NavigationItem::make('Admin Panel')
+                    ->url(fn () => route('filament.app.pages.dashboard'))
+                    ->icon('heroicon-o-briefcase')
+                    ->visible(fn () => request()->user()->hasPermissionTo('admin.access')),
+            ])
+            ->userMenuItems([
+                Action::make('Email Settings')
+                    ->url(fn () => route('filament.training.pages.email-settings'))
+                    ->icon('heroicon-m-envelope'),
+            ])
+            ->viteTheme('resources/assets/css/tailwind.css')
+            ->renderHook(
+                PanelsRenderHook::TOPBAR_LOGO_AFTER,
+                fn (): string => app()->environment('local')
+                ? '<div style="position: absolute; left: 50%; transform: translateX(-50%); color: #ef4444; font-weight: 600; pointer-events: none;">Development environment</div>'
+                : '',
+            );
     }
 }

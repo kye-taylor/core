@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Permission;
+use App\Services\Training\MentorPermissionService;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Exceptions\PermissionDoesNotExist;
 use Spatie\Permission\Models\Role;
@@ -23,6 +24,25 @@ class RolesAndPermissionsSeeder extends Seeder
         $privacc = Role::firstOrCreate(['name' => 'privacc', 'guard_name' => 'web', 'default' => false]);
         $member = Role::firstOrCreate(['name' => 'member', 'guard_name' => 'web', 'default' => true]);
 
+        // Create ATC Examiner Roles
+        $obsExaminer = Role::firstOrCreate(['name' => 'ATC Examiner (OBS)', 'guard_name' => 'web', 'default' => false]);
+        $twrExaminer = Role::firstOrCreate(['name' => 'ATC Examiner (TWR)', 'guard_name' => 'web', 'default' => false]);
+        $appExaminer = Role::firstOrCreate(['name' => 'ATC Examiner (APP)', 'guard_name' => 'web', 'default' => false]);
+        $ctrExaminer = Role::firstOrCreate(['name' => 'ATC Examiner (CTR)', 'guard_name' => 'web', 'default' => false]);
+
+        $pilotExaminer = Role::firstOrCreate(['name' => 'Pilot Examiner (P1)', 'guard_name' => 'web', 'default' => false]);
+        $pilotExaminer = Role::firstOrCreate(['name' => 'Pilot Examiner (P2)', 'guard_name' => 'web', 'default' => false]);
+        $pilotExaminer = Role::firstOrCreate(['name' => 'Pilot Examiner (P3)', 'guard_name' => 'web', 'default' => false]);
+
+        foreach (MentorPermissionService::ATC_CATEGORY_ROLE_MAP as $mentorRole) {
+            Role::firstOrCreate(['name' => $mentorRole, 'guard_name' => 'web', 'default' => false]);
+        }
+
+        foreach (MentorPermissionService::PILOT_CATEGORY_ROLE_MAP as $mentorRole) {
+            Role::firstOrCreate(['name' => $mentorRole, 'guard_name' => 'web', 'default' => false]);
+        }
+        Role::firstOrCreate(['name' => 'P3 Mentor', 'guard_name' => 'web', 'default' => false]);
+
         // Add All Permissions
         $permissions = [
             app()->isProduction() ? null : '*',
@@ -31,9 +51,57 @@ class RolesAndPermissionsSeeder extends Seeder
             'admin.access',
             'horizon.access',
             'telescope.access',
+            'log-viewer.access',
 
             // Training Panel Permissions
             'training.access',
+            'training.beta',
+            'training.exams.access',
+            'training.exams.setup',
+            'training.exams.conduct.*',
+            'training.exams.conduct.obs',
+            'training.exams.conduct.twr',
+            'training.exams.conduct.app',
+            'training.exams.conduct.ctr',
+            'training.exams.conduct.p1',
+            'training.exams.conduct.p2',
+            'training.exams.conduct.p3',
+            'training.exams.override-result',
+            'training.exams.request.remove',
+            'training.exams.view-upcoming.*',
+            'training.exams.view-upcoming.atc',
+            'training.exams.view-upcoming.pilot',
+            'training.theory.access',
+            'training.theory.view.*',
+            'training.theory.view.obs',
+            'training.theory.view.twr',
+            'training.theory.view.app',
+            'training.theory.view.ctr',
+            'training.theory.manage.*',
+            'training.theory.manage.obs',
+            'training.theory.manage.twr',
+            'training.theory.manage.app',
+            'training.theory.manage.ctr',
+            'training.examiners.view.*',
+            'training.examiners.view.atc',
+            'training.examiners.view.pilot',
+            'training.examiners.manage.*',
+            'training.examiners.manage.atc',
+            'training.examiners.manage.pilot',
+
+            'training.mentors.view.*',
+            'training.mentors.view.atc',
+            'training.mentors.view.pilot',
+            'training.mentors.manage.*',
+            'training.mentors.manage.atc',
+            'training.mentors.manage.pilot',
+
+            'training.mentoring.view.*',
+            'training.mentoring.sessions.*',
+            'training.mentoring.sessions.reallocate.*',
+
+            'training.statistics.view.*',
+            'training.statistics.view.atc',
 
             // Account Permissions
             'account.self',
@@ -49,6 +117,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'account.ban.edit.*',
             'account.ban.repeal.*',
             'account.note.create',
+            'account.qualification.manual-upgrade.atc',
 
             // Permissions & Access Permissions
             'permission.view.*',
@@ -59,19 +128,22 @@ class RolesAndPermissionsSeeder extends Seeder
             'role.create',
             'role.edit.*',
             'role.delete.*',
+            'role.manage-delegates.*',
+            'role.sync-discord.*',
 
             // Visit Transfer System Permissions
-            // 'vt.access',
-            // 'vt.facility.view.*',
-            // 'vt.facility.create',
-            // 'vt.facility.update.*',
-            // 'vt.application.view.*',
-            // 'vt.application.accept.*',
-            // 'vt.application.reject.*',
-            // 'vt.application.complete.*',
-            // 'vt.application.reference.accept.*',
-            // 'vt.application.reference.reject.*',
-            // 'vt.application.check.modify.*',
+            'vt.access',
+            'vt.facility.view.*',
+            'vt.facility.create',
+            'vt.facility.update.*',
+            'vt.application.view.*',
+            'vt.application.accept.*',
+            'vt.application.reject.*',
+            'vt.application.complete.*',
+            'vt.application.cancel.*',
+            'vt.status.revoke',
+            'vt.status.grant.manual',
+            'vt.application.modify.*',
 
             // Waiting List System Permissions,
             'waiting-lists.access',
@@ -88,12 +160,39 @@ class RolesAndPermissionsSeeder extends Seeder
             'waiting-lists.remove-accounts.*',
             'waiting-lists.remove-accounts.atc',
             'waiting-lists.remove-accounts.pilot',
+            'waiting-lists.training-place.offer.*',
+            'waiting-lists.training-place.offer.atc',
+            'waiting-lists.training-place.offer.pilot',
+            'waiting-lists.training-place.view-offer.*',
+            'waiting-lists.training-place.view-offer.atc',
+            'waiting-lists.training-place.view-offer.pilot',
+            'waiting-lists.training-place.rescind-offer.*',
+            'waiting-lists.training-place.rescind-offer.atc',
+            'waiting-lists.training-place.rescind-offer.pilot',
             'waiting-lists.add-flags.*',
             'waiting-lists.delete.*',
+            'waiting-lists.delete.atc',
+            'waiting-lists.delete.pilot',
             'waiting-lists.create',
             'waiting-lists.admin.*',
             'waiting-lists.admin.atc',
             'waiting-lists.admin.pilot',
+
+            // Training Places Permissions
+            'training-places.view.*',
+            'training-places.view.atc',
+            'training-places.view.pilot',
+            'training-places.manual-setup',
+            'training-places.manual-setup.atc',
+            'training-places.manual-setup.pilot',
+            'training-places.create-adhoc',
+            'training-places.create-adhoc.atc',
+            'training-places.create-adhoc.pilot',
+            'training-places.revoke.*',
+            'training-places.restore.*',
+            'training-places.loas.create.*',
+            'training-places.loas.end-early.*',
+            'training-places.availability-warnings.delete',
 
             // // Feedback System Permissions
             'feedback.access',
@@ -114,6 +213,10 @@ class RolesAndPermissionsSeeder extends Seeder
 
             // Operations System Permissions
             'operations.access',
+            'operations.positions',
+
+            // Pilot System Permissions
+            'pilot.access',
 
             // // TeamSpeak Permissions
             // 'teamspeak.servergroup.serveradmin',
@@ -192,6 +295,12 @@ class RolesAndPermissionsSeeder extends Seeder
             'roster.manage',
             'roster.restriction.create',
             'roster.restriction.remove',
+            'atc.stats',
+
+            // Discord
+            'discord.tag.view',
+            'discord.tag.manage',
+
         ];
 
         foreach ($permissions as $permission) {

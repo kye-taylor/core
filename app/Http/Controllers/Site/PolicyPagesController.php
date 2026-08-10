@@ -35,12 +35,12 @@ class PolicyPagesController extends \App\Http\Controllers\BaseController
         return $this->viewMake('site.policy.visiting-and-transferring');
     }
 
-    public function viewTerms()
+    public function viewCommunityStandards()
     {
-        $this->setTitle('Terms & Conditions');
-        $this->addBreadcrumb('Terms & Conditions', route('site.policy.terms'));
+        $this->setTitle('Community Standards');
+        $this->addBreadcrumb('Community Standards', route('site.policy.community-standards'));
 
-        return $this->viewMake('site.policy.terms');
+        return $this->viewMake('site.policy.community-standards');
     }
 
     public function viewPrivacy()
@@ -67,11 +67,35 @@ class PolicyPagesController extends \App\Http\Controllers\BaseController
         return $this->viewMake('site.policy.branding');
     }
 
-    public function viewStreaming()
+    public function viewS1Syllabus()
     {
-        $this->setTitle('Streaming Guidelines');
-        $this->addBreadcrumb('Streaming Guidelines', route('site.policy.streaming'));
+        $this->setTitle('S1 Syllabus and Lesson Plans');
+        $this->addBreadcrumb('S1 Syllabus and Lesson Plans', route('site.policy.training.s1-syllabus'));
 
-        return $this->viewMake('site.policy.streaming');
+        return $this->viewMake('site.policy.training-process.s1-syllabus');
+    }
+
+    public function viewS2Syllabus()
+    {
+        $this->setTitle('S2 Syllabus and Lesson Plans');
+        $this->addBreadcrumb('S2 Syllabus and Lesson Plans', route('site.policy.training.s2-syllabus'));
+
+        return $this->viewMake('site.policy.training-process.s2-syllabus');
+    }
+
+    public function viewS3Syllabus()
+    {
+        $this->setTitle('S3 Syllabus and Lesson Plans');
+        $this->addBreadcrumb('S3 Syllabus and Lesson Plans', route('site.policy.training.s3-syllabus'));
+
+        return $this->viewMake('site.policy.training-process.s3-syllabus');
+    }
+
+    public function viewC1Syllabus()
+    {
+        $this->setTitle('C1 Syllabus and Lesson Plans');
+        $this->addBreadcrumb('C1 Syllabus and Lesson Plans', route('site.policy.training.c1-syllabus'));
+
+        return $this->viewMake('site.policy.training-process.c1-syllabus');
     }
 }

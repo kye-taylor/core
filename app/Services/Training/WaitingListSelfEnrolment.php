@@ -6,6 +6,7 @@ use App\Models\Mship\Account;
 use App\Models\Mship\Qualification;
 use App\Models\Mship\State;
 use App\Models\NetworkData\Atc;
+use App\Models\Training\TrainingPlace\TrainingPlace;
 use App\Models\Training\WaitingList;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -29,8 +30,7 @@ class WaitingListSelfEnrolment
             return false;
         }
 
-        // Check if the waiting list is at capacity
-        if ($waitingList->isAtCapacity()) {
+        if (TrainingPlace::where('account_id', $account->id)->whereNull('deleted_at')->exists()) {
             return false;
         }
 
@@ -85,6 +85,10 @@ class WaitingListSelfEnrolment
             if ($atcSessionsAtQualificationsHours < $waitingList->self_enrolment_hours_at_qualification_minimum_hours) {
                 return false;
             }
+        }
+
+        if (! $waitingList->accountHasRequiredEndorsement($account)) {
+            return false;
         }
 
         return true;

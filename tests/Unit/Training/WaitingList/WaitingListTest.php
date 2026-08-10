@@ -3,6 +3,8 @@
 namespace Tests\Unit\Training\WaitingList;
 
 use App\Models\Mship\Account;
+use App\Models\Mship\Qualification;
+use App\Models\Training\TrainingPosition\TrainingPosition;
 use App\Models\Training\WaitingList;
 use App\Models\Training\WaitingList\WaitingListFlag;
 use Carbon\Carbon;
@@ -204,23 +206,201 @@ class WaitingListTest extends TestCase
         $this->waitingList->save();
 
         // check defaults when column not set.
-        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true], $this->waitingList->feature_toggles_formatted);
+        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true, 'is_vt' => false], $this->waitingList->feature_toggles_formatted);
 
         $this->waitingList->feature_toggles = ['check_atc_hours' => true];
         $this->waitingList->save();
 
         // check_cts_theory_exam is not set, so it should default to true
-        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true], $this->waitingList->feature_toggles_formatted);
+        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true, 'is_vt' => false], $this->waitingList->feature_toggles_formatted);
 
         $this->waitingList->feature_toggles = ['check_cts_theory_exam' => true];
 
         // check_atc_hours is not set, so it should default to true
-        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true], $this->waitingList->feature_toggles_formatted);
+        $this->assertEquals((object) ['check_atc_hours' => true, 'check_cts_theory_exam' => true, 'is_vt' => false], $this->waitingList->feature_toggles_formatted);
 
         $this->waitingList->feature_toggles = ['check_atc_hours' => false, 'check_cts_theory_exam' => false];
         $this->waitingList->save();
 
         // both values are false set so return value
-        $this->assertEquals((object) ['check_atc_hours' => false, 'check_cts_theory_exam' => false], $this->waitingList->feature_toggles_formatted);
+        $this->assertEquals((object) ['check_atc_hours' => false, 'check_cts_theory_exam' => false, 'is_vt' => false], $this->waitingList->feature_toggles_formatted);
+    }
+
+    #[Test]
+    public function it_can_have_training_positions()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+
+        $this->assertTrue($this->waitingList->trainingPositions->contains($trainingPosition));
+        $this->assertCount(1, $this->waitingList->trainingPositions);
+    }
+
+    #[Test]
+    public function it_can_have_multiple_training_positions()
+    {
+        $trainingPositions = TrainingPosition::factory()->count(3)->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPositions->pluck('id'));
+
+        $this->assertCount(3, $this->waitingList->fresh()->trainingPositions);
+        $trainingPositions->each(function ($position) {
+            $this->assertTrue($this->waitingList->trainingPositions->contains($position));
+        });
+    }
+
+    #[Test]
+    public function it_can_remove_training_positions()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+        $this->assertTrue($this->waitingList->fresh()->trainingPositions->contains($trainingPosition));
+
+        $this->waitingList->trainingPositions()->detach($trainingPosition->id);
+        $this->assertFalse($this->waitingList->fresh()->trainingPositions->contains($trainingPosition));
+    }
+
+    #[Test]
+    public function it_syncs_training_positions()
+    {
+        $initialPositions = TrainingPosition::factory()->count(2)->create();
+        $this->waitingList->trainingPositions()->attach($initialPositions->pluck('id'));
+
+        $newPositions = TrainingPosition::factory()->count(2)->create();
+        $this->waitingList->trainingPositions()->sync($newPositions->pluck('id'));
+
+        $this->waitingList = $this->waitingList->fresh();
+        $this->assertCount(2, $this->waitingList->trainingPositions);
+
+        $newPositions->each(function ($position) {
+            $this->assertTrue($this->waitingList->trainingPositions->contains($position));
+        });
+
+        $initialPositions->each(function ($position) {
+            $this->assertFalse($this->waitingList->trainingPositions->contains($position));
+        });
+    }
+
+    #[Test]
+    public function it_has_empty_training_positions_by_default()
+    {
+        $newWaitingList = WaitingList::factory()->create();
+
+        $this->assertCount(0, $newWaitingList->trainingPositions);
+        $this->assertInstanceOf(\Illuminate\Database\Eloquent\Collection::class, $newWaitingList->trainingPositions);
+    }
+
+    #[Test]
+    public function it_stores_training_positions_polymorphically()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+
+        $this->assertDatabaseHas('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $this->waitingList->id,
+        ]);
+    }
+
+    #[Test]
+    public function it_can_have_qualifications()
+    {
+        $qualification = Qualification::factory()->pilot()->create();
+
+        $this->waitingList->qualifications()->attach($qualification->id);
+
+        $this->assertTrue($this->waitingList->fresh()->qualifications->contains($qualification));
+        $this->assertCount(1, $this->waitingList->qualifications);
+
+        $this->assertDatabaseHas('trainable_waiting_list', [
+            'trainable_type' => Qualification::class,
+            'trainable_id' => $qualification->id,
+            'waiting_list_id' => $this->waitingList->id,
+        ]);
+    }
+
+    #[Test]
+    public function it_merges_positions_and_qualifications_into_trainables()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+        $qualification = Qualification::factory()->pilot()->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+        $this->waitingList->qualifications()->attach($qualification->id);
+
+        $trainables = $this->waitingList->fresh()->trainables;
+
+        $this->assertCount(2, $trainables);
+        $this->assertTrue($trainables->contains(fn ($trainable) => $trainable instanceof TrainingPosition && $trainable->is($trainingPosition)));
+        $this->assertTrue($trainables->contains(fn ($trainable) => $trainable instanceof Qualification && $trainable->is($qualification)));
+    }
+
+    #[Test]
+    public function it_cascades_delete_on_pivot_when_training_position_is_deleted()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+
+        $this->assertDatabaseHas('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $this->waitingList->id,
+        ]);
+
+        $trainingPosition->delete();
+
+        $this->assertDatabaseMissing('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $this->waitingList->id,
+        ]);
+    }
+
+    #[Test]
+    public function it_maintains_pivot_when_waiting_list_is_soft_deleted()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+
+        $waitingListId = $this->waitingList->id;
+
+        $this->assertDatabaseHas('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $waitingListId,
+        ]);
+
+        // Soft delete does not cascade to pivot table
+        $this->waitingList->delete();
+
+        $this->assertDatabaseHas('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $waitingListId,
+        ]);
+
+        // Force delete should cascade
+        $this->waitingList->forceDelete();
+
+        $this->assertDatabaseMissing('trainable_waiting_list', [
+            'trainable_type' => TrainingPosition::class,
+            'trainable_id' => $trainingPosition->id,
+            'waiting_list_id' => $waitingListId,
+        ]);
+    }
+
+    #[Test]
+    public function it_prevents_duplicate_training_position_attachments()
+    {
+        $trainingPosition = TrainingPosition::factory()->create();
+
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->waitingList->trainingPositions()->attach($trainingPosition->id);
     }
 }

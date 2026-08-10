@@ -6,6 +6,7 @@ use App\Events\Discord\DiscordUnlinked;
 use App\Exceptions\Discord\DiscordUserNotFoundException;
 use App\Libraries\Discord;
 use App\Models\Discord\DiscordRoleRule;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -20,7 +21,27 @@ trait HasDiscordAccount
         // in the event that the name + CID exceeds, truncate accordin
         $nameWithCid = "{$this->name} - {$this->id}";
         if (Str::length($nameWithCid) > 32) {
+            // Attempt to truncate last name
             $firstLetterOfLastName = substr($this->name_last, 0, 1);
+
+            if (Str::length("{$this->name_preferred} {$firstLetterOfLastName} - {$this->id}") > 32) {
+                // Attempt as many parts of the first name as possible
+                $firstNameParts = explode(' ', $this->name_preferred);
+                $truncatedFirstName = '';
+                foreach ($firstNameParts as $part) {
+                    if (Str::length("{$truncatedFirstName} {$part} {$firstLetterOfLastName} - {$this->id}") > 32) {
+                        break;
+                    }
+                    $truncatedFirstName .= ($truncatedFirstName ? ' ' : '').$part;
+                }
+
+                if ($truncatedFirstName === '') {
+                    $availableFirstNameLength = 32 - Str::length(" {$firstLetterOfLastName} - {$this->id}");
+                    $truncatedFirstName = Str::substr($firstNameParts[0] ?? $this->name_preferred, 0, max($availableFirstNameLength, 1));
+                }
+
+                return "{$truncatedFirstName} {$firstLetterOfLastName} - {$this->id}";
+            }
 
             return "{$this->name_preferred} {$firstLetterOfLastName} - {$this->id}";
         }
@@ -40,67 +61,102 @@ trait HasDiscordAccount
         /** @var Discord */
         $discord = app()->make(Discord::class);
 
-        $suspendedRoleId = config('services.discord.suspended_member_role_id');
+        $suspendedRoleId = config('services.discord.suspended_member_role_id') ?? '';
 
-        // Attempt to set user's nickname
         try {
             $discord->setNickname($this, $this->discordName);
-        } catch (DiscordUserNotFoundException $e) {
-            return event(new DiscordUnlinked($this));
-        }
 
-        // Retrieve users current roles
-        $currentRoles = $discord->getUserRoles($this);
+            // Retrieve users current roles
+            $currentRoles = $discord->getUserRoles($this);
 
-        // Handle if the user is banned on core
-        if ($this->isBanned) {
-            // If they are already in the suspended role, we are happy
-            if ($currentRoles->contains($suspendedRoleId)) {
+            if ($currentRoles === null) {
                 return;
             }
 
-            // Remove each of their current roles
-            $currentRoles->each(function (int $role) use ($discord) {
-                $discord->removeRoleById($this, $role);
-                sleep(1);
-            });
+            if (! $currentRoles instanceof Collection) {
+                $currentRoles = collect($currentRoles);
+            }
 
-            // Give them the suspended user role
-            $discord->grantRoleById($this, $suspendedRoleId);
+            // Handle if the user is banned on core
+            if ($this->isBanned) {
+                // If they are already in the suspended role, we are happy
+                if ($currentRoles->contains((string) $suspendedRoleId)) {
+                    return;
+                }
 
-            // We'll return, as suspended users should only have this suspended role
-            return;
+                $rolesToAdd = [(string) $suspendedRoleId];
+
+                $boosterRoleId = config('services.discord.booster_role_id');
+                if ($boosterRoleId && $currentRoles->contains((string) $boosterRoleId)) {
+                    $rolesToAdd[] = (string) $boosterRoleId;
+                }
+
+                // Set their roles to only the suspended role (replaces all current roles)
+                $discord->setRoles($this, $rolesToAdd);
+
+                return;
+            }
+
+            // Compute desired roles based on DiscordRoleRules
+            $targetRoles = $this->computeTargetRoles($currentRoles, $suspendedRoleId);
+
+            // Only call the API if roles actually changed
+            if ($this->rolesNeedUpdate($currentRoles, $targetRoles)) {
+                Log::info('Updating Discord roles for account', [
+                    'name' => $this->full_name,
+                    'account_id' => $this->getKey(),
+                    'current' => $currentRoles->toArray(),
+                    'target' => $targetRoles->toArray(),
+                ]);
+
+                $discord->setRoles($this, $targetRoles->values()->toArray());
+            }
+        } catch (DiscordUserNotFoundException $e) {
+            return event(new DiscordUnlinked($this));
         }
+    }
 
-        // If they have the suspended role, remove it (no longer suspended)
-        if ($currentRoles->contains($suspendedRoleId)) {
-            $discord->removeRoleById($this, $suspendedRoleId);
-        }
+    /**
+     * Compute the target set of Discord roles for this account based on DiscordRoleRule rules.
+     *
+     * - Managed roles (those with at least one DiscordRoleRule) are set to the
+     *   satisfied set: present if any rule grants them, absent otherwise.
+     * - Unmanaged roles are preserved as-is.
+     * - The suspended role is always excluded from the result.
+     */
+    private function computeTargetRoles(Collection $currentRoles, string $suspendedRoleId): Collection
+    {
+        $targetRoles = $currentRoles->reject(fn ($role) => (string) $role === $suspendedRoleId);
 
-        // Evaluate available discord roles
         $discordRoleRules = DiscordRoleRule::all()->map(function (DiscordRoleRule $roleRule) {
             return ['discord_id' => $roleRule->discord_id, 'satisfied' => $roleRule->accountSatisfies($this)];
         });
 
-        // Group each of the role rules by the discord role id (there could be multiple rules for a single discord role). We then evaluate each grouped set, to see if the user has any of the rules satisified
-        $discordRoleRules->groupBy('discord_id')->each(function ($groupedRoleRules, $discordRoleId) use ($currentRoles, $discord) {
-            if (collect($groupedRoleRules)->contains(fn ($rule) => (bool) $rule['satisfied'])) {
-                // At least one role rule grants this discord role. We will give it to the user if they don't already have it
-                if (! $currentRoles->contains($discordRoleId)) {
-                    Log::info("{$this->full_name} ({$this->getKey()}) should have discord role {$discordRoleId}, but doesn't");
-                    $discord->grantRoleById($this, $discordRoleId);
-                    sleep(1);
-                }
+        $managedRoleIds = $discordRoleRules->pluck('discord_id')->unique()->values();
 
-                return;
-            }
+        $satisfiedRoleIds = $discordRoleRules
+            ->groupBy('discord_id')
+            ->filter(fn (Collection $group) => $group->contains(fn ($rule) => $rule['satisfied']))
+            ->keys()
+            ->map(fn ($id) => (string) $id);
 
-            if ($currentRoles->contains($discordRoleId)) {
-                // None of the rules grant this role. We will remove it if they have it
-                Log::info("{$this->full_name} ({$this->getKey()}) shouldn't have discord role {$discordRoleId}, but has it");
-                $discord->removeRoleById($this, $discordRoleId);
-                sleep(1);
-            }
-        });
+        // Remove managed roles that aren't satisfied
+        $targetRoles = $targetRoles->reject(fn ($role) => $managedRoleIds->contains((string) $role));
+
+        // Add satisfied managed roles, ensuring the suspended role can't be re-introduced
+        return $targetRoles
+            ->merge($satisfiedRoleIds)
+            ->unique()
+            ->reject(fn ($role) => (string) $role === $suspendedRoleId)
+            ->values();
+    }
+
+    /**
+     * Check whether the current and target role sets differ.
+     */
+    private function rolesNeedUpdate(Collection $currentRoles, Collection $targetRoles): bool
+    {
+        return $currentRoles->map(fn ($role) => (string) $role)->sort()->values()->toArray()
+            !== $targetRoles->map(fn ($role) => (string) $role)->sort()->values()->toArray();
     }
 }

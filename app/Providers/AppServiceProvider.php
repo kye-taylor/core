@@ -2,22 +2,28 @@
 
 namespace App\Providers;
 
+use App\Filament\Admin\Livewire\GlobalSearch;
+use App\Filament\Training\Pages\Endorsements\Tables\ResourceTable;
 use App\Http\Controllers\BaseController;
 use App\Http\Responses\LogoutResponse;
 use App\Libraries\Discord;
-use App\Libraries\Forum;
 use App\Libraries\UKCP;
 use Bugsnag\BugsnagLaravel\Facades\Bugsnag;
-use Filament\Http\Responses\Auth\Contracts\LogoutResponse as LogoutResponseContract;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Testing\ParallelTesting;
+use Livewire\Livewire;
+use Opcodes\LogViewer\Facades\LogViewer;
+use Spatie\Permission\PermissionRegistrar;
 use Whitecube\LaravelCookieConsent\Facades\Cookies;
 
 class AppServiceProvider extends ServiceProvider
@@ -59,9 +65,22 @@ class AppServiceProvider extends ServiceProvider
                 ->by('discord-api-call');
         });
 
+        Livewire::component('filament.livewire.global-search', GlobalSearch::class);
+        Livewire::component('endorsements-resource-table', ResourceTable::class);
+
         Cookies::essentials()
             ->session()
             ->csrf();
+
+        Gate::define('viewLogViewer', function ($user) {
+            return $user?->hasPermissionTo('log-viewer.access') ?? false;
+        });
+
+        LogViewer::auth(function ($request) {
+            return $request->user()?->hasPermissionTo('log-viewer.access') ?? false;
+        });
+
+        $this->configureParallelTesting();
     }
 
     /**
@@ -75,8 +94,7 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(UKCP::class);
         $this->app->singleton(Discord::class);
-        $this->app->singleton(Forum::class);
-        $this->app->bind(LogoutResponseContract::class, LogoutResponse::class);
+        $this->app->bind(\Filament\Auth\Http\Responses\Contracts\LogoutResponse::class, LogoutResponse::class);
         $this->app->singleton(\Wohali\OAuth2\Client\Provider\Discord::class, function () {
             return new \Wohali\OAuth2\Client\Provider\Discord([
                 'clientId' => Config::get('services.discord.client_id'),
@@ -84,6 +102,23 @@ class AppServiceProvider extends ServiceProvider
                 'redirectUri' => Config::get('services.discord.redirect_uri'),
             ]);
         });
+    }
+
+    private function configureParallelTesting(): void
+    {
+        if (! $this->app->runningUnitTests()) {
+            return;
+        }
+
+        if (! class_exists(ParallelTesting::class)) {
+            return;
+        }
+
+        $this->app->make(ParallelTesting::class)
+            ->setUpTestDatabase(function () {
+                Artisan::call('db:seed', ['--force' => true]);
+                $this->app->make(PermissionRegistrar::class)->forgetCachedPermissions();
+            });
     }
 
     public function registerValidatorExtensions()

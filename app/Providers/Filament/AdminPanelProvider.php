@@ -2,16 +2,18 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Admin\Pages\Dashboard;
+use App\Filament\Widgets\AccountInfoWidget;
 use App\Http\Middleware\AdminPanelFilamentAccessMiddleware;
+use App\Http\Middleware\MandatoryTwoFactor;
 use App\Http\Middleware\TrackInactivity;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
 use Filament\Navigation\NavigationItem;
-use Filament\Pages;
 use Filament\Panel;
 use Filament\PanelProvider;
-use Filament\Widgets;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -28,18 +30,17 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('app')
             ->path('admin')
-            ->login()
             ->colors([
                 'primary' => '#25ADE3',
             ])
             ->discoverResources(in: app_path('Filament/Admin/Resources'), for: 'App\\Filament\\Admin\\Resources')
             ->discoverPages(in: app_path('Filament/Admin/Pages'), for: 'App\\Filament\\Admin\\Pages')
             ->pages([
-                Pages\Dashboard::class,
+                Dashboard::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Admin/Widgets'), for: 'App\\Filament\\Admin\\Widgets')
             ->widgets([
-                Widgets\AccountWidget::class,
+                AccountInfoWidget::class,
             ])
             ->middleware([
                 EncryptCookies::class,
@@ -50,21 +51,25 @@ class AdminPanelProvider extends PanelProvider
                 VerifyCsrfToken::class,
                 SubstituteBindings::class,
                 TrackInactivity::class,
+                MandatoryTwoFactor::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
             ])
             ->authMiddleware([
                 AdminPanelFilamentAccessMiddleware::class,
             ])
-            ->brandLogo(asset('images/branding/vatsimuk_whiteblue.png'))
+            ->brandLogo(asset('images/branding/vatsimuk_blackblue.png'))
+            ->darkModeBrandLogo(asset('images/branding/vatsimuk_whiteblue.png'))
+            ->brandName('VATSIM UK')
             ->navigationGroups([
                 NavigationGroup::make('Technology'),
             ])
+            ->viteTheme('resources/assets/css/tailwind.css')
             ->navigationItems([
-                NavigationItem::make('Legacy Admin Panel')
-                    ->url(fn () => route('adm.index')) // This is a closure as routes may not have been registered yet
-                    ->icon('heroicon-o-clock')
-                    ->visible(fn () => request()->user()->hasPermissionTo('adm')),
+                NavigationItem::make('Training Panel')
+                    ->url(fn () => route('filament.training.pages.dashboard'))
+                    ->icon('heroicon-o-academic-cap')
+                    ->visible(fn () => request()->user()->hasPermissionTo('training.access')),
                 NavigationItem::make('Horizon')
                     ->group('Technology')
                     ->icon('heroicon-o-bars-arrow-down')
@@ -75,6 +80,17 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-o-magnifying-glass')
                     ->url(fn () => route('telescope'))
                     ->visible(fn () => request()->user()->can('viewTelescope')),
-            ]);
+                NavigationItem::make('Log Viewer')
+                    ->group('Technology')
+                    ->icon('heroicon-o-document-text')
+                    ->url(fn () => route('log-viewer.index'))
+                    ->visible(fn () => request()->user()->can('viewLogViewer')),
+            ])
+            ->renderHook(
+                PanelsRenderHook::TOPBAR_LOGO_AFTER,
+                fn (): string => app()->environment('local')
+                ? '<div style="position: absolute; left: 50%; transform: translateX(-50%); color: #ef4444; font-weight: 600; pointer-events: none;">Development environment</div>'
+                : '',
+            );
     }
 }

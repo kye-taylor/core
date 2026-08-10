@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Mship\Account;
 use Illuminate\Auth\Access\HandlesAuthorization;
+use Illuminate\Auth\Access\Response;
 
 class AccountPolicy
 {
@@ -12,20 +13,25 @@ class AccountPolicy
     /**
      * Determine whether the user can view any models.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function viewAny(Account $actor)
     {
         return $actor->canAny(['account.view-insensitive.*', 'account.view-sensitive.*']);
     }
 
+    public function syncDiscord(Account $actor)
+    {
+        return $actor->canAny(['account.view-insensitive.*']);
+    }
+
     /**
      * Determine whether the user can view the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function view(Account $actor, Account $subject)
     {
@@ -35,9 +41,9 @@ class AccountPolicy
     /**
      * Determine whether the user can view sensitive information on the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function viewSensitive(Account $actor, Account $subject)
     {
@@ -47,8 +53,8 @@ class AccountPolicy
     /**
      * Determine whether the user can create models.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function create(Account $actor)
     {
@@ -58,9 +64,9 @@ class AccountPolicy
     /**
      * Determine whether the user can update the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function update(Account $actor, Account $subject)
     {
@@ -90,9 +96,9 @@ class AccountPolicy
     /**
      * Determine whether the user can delete the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function delete(Account $actor, Account $subject)
     {
@@ -102,9 +108,9 @@ class AccountPolicy
     /**
      * Determine whether the user can restore the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function restore(Account $actor, Account $subject)
     {
@@ -114,9 +120,9 @@ class AccountPolicy
     /**
      * Determine whether the user can permanently delete the model.
      *
-     * @param  \App\Models\Mship\Account  $account
-     * @param  \App\Models\Mship\Account  $account
-     * @return \Illuminate\Auth\Access\Response|bool
+     * @param  Account  $account
+     * @param  Account  $account
+     * @return Response|bool
      */
     public function forceDelete(Account $actor, Account $subject)
     {

@@ -4,11 +4,11 @@ $screen-sm: 802px;
 @import url(https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700|Dosis:200,400,500,600);
 @import "_bootstrap";
 @import "jquery-datetimepicker/jquery.datetimepicker";
-@import "_nav";
 @import "_visit-transfer";
 @import "_vuk-letters";
 @import "_padding-utils";
 @import "_top-notification";
+@import "_markdown";
 
 body, html {
   margin: 0 auto;
@@ -39,7 +39,7 @@ body, html {
 }
 
 .dev_environment_notification {
-    height: 20px;
+    padding: 0.35em 0;
     background-color: red;
     text-align: center;
 }
@@ -129,11 +129,16 @@ body, html {
 
 .banner_breadcrumb_spacer {
   height: 90px;
+
+  @media (max-width: $screen-md-min) {
+    // Spacer + .page_content padding-top must equal --mobile-fixed-nav-height (set at runtime).
+    height: calc(var(--mobile-fixed-nav-height) - var(--mobile-page-content-padding-top));
+  }
 }
 
 .page_content {
   margin: 0 auto;
-  padding-top: 40px;
+  padding-top: var(--mobile-page-content-padding-top);
   width: 90%;
 }
 
@@ -182,6 +187,15 @@ body, html {
   }
 }
 
+
+/* Prevent Tailwind's .collapse utility from overriding Bootstrap's .collapse class.
+   Tailwind sets visibility: collapse, which hides content in Bootstrap accordions. */
+.panel-collapse.collapse,
+.summary-container.collapse,
+.panel-collapse.collapsing,
+.summary-container.collapsing {
+  visibility: visible;
+}
 
 /* Bootstrap Overwrite */
 

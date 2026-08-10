@@ -2,9 +2,21 @@
 
 namespace App\Exceptions;
 
+use App\Http\Middleware\SecurityHeaders;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Http\Request as HttpRequest;
+use Illuminate\Http\Response;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
+use Illuminate\Validation\ValidationException;
+use League\OAuth2\Server\Exception\OAuthServerException;
+use Symfony\Component\Console\Exception\CommandNotFoundException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -15,15 +27,16 @@ class Handler extends ExceptionHandler
      * @var array
      */
     protected $dontReport = [
-        \Illuminate\Auth\AuthenticationException::class,
-        \Illuminate\Auth\Access\AuthorizationException::class,
-        \Symfony\Component\HttpKernel\Exception\HttpException::class,
-        \Symfony\Component\Console\Exception\CommandNotFoundException::class,
-        \Illuminate\Database\Eloquent\ModelNotFoundException::class,
-        \Illuminate\Session\TokenMismatchException::class,
-        \Illuminate\Validation\ValidationException::class,
-        \Illuminate\Queue\MaxAttemptsExceededException::class,
-        \League\OAuth2\Server\Exception\OAuthServerException::class,
+        AuthenticationException::class,
+        AuthorizationException::class,
+        HttpException::class,
+        CommandNotFoundException::class,
+        ModelNotFoundException::class,
+        TokenMismatchException::class,
+        ValidationException::class,
+        MaxAttemptsExceededException::class,
+        OAuthServerException::class,
+        Discord\DiscordUserInviteException::class,
     ];
 
     /**
@@ -60,11 +73,15 @@ class Handler extends ExceptionHandler
     /**
      * Render an exception into an HTTP response.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
+     * @param  HttpRequest  $request
+     * @return Response
      */
     public function render($request, Throwable $e)
     {
-        return parent::render($request, $e);
+        $response = parent::render($request, $e);
+
+        SecurityHeaders::addSecurityHeaders($response, $request instanceof HttpRequest ? $request : null);
+
+        return $response;
     }
 }

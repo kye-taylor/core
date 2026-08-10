@@ -15,9 +15,59 @@ class ExaminerSettings extends Model
 
     public $timestamps = false;
 
+    protected $fillable = [
+        'memberID',
+        'OBS',
+        'S1',
+        'S2',
+        'S3',
+        'P1',
+        'P2',
+        'P3',
+        'P4',
+        'P5',
+        'lastUpdated',
+        'updatedBy',
+    ];
+
     public function member()
     {
         return $this->belongsTo(Member::class, 'memberID', 'id');
+    }
+
+    public function scopeObs($query)
+    {
+        return $query->where('OBS', '=', 1);
+    }
+
+    public function scopeTwr($query)
+    {
+        return $query->where('S1', '=', 1);
+    }
+
+    public function scopeApp($query)
+    {
+        return $query->where('S2', '=', 1);
+    }
+
+    public function scopeCtr($query)
+    {
+        return $query->where('S3', '=', 1);
+    }
+
+    public function scopeP1($query)
+    {
+        return $query->where('P1', '=', 1);
+    }
+
+    public function scopeP2($query)
+    {
+        return $query->where('P2', '=', 1);
+    }
+
+    public function scopeP3($query)
+    {
+        return $query->where('P3', '=', 1);
     }
 
     public function scopeAtc($query)
